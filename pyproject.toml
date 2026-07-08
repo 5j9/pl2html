@@ -1,0 +1,62 @@
+[project]
+name = "pl2html"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "polars>=1.42.1",
+]
+
+[project.urls]
+GitHub = "https://github.com/5j9/pl2html"
+
+[tool.uv.build-backend]
+module-root = ''
+module-name = "{{ cookiecutter.project_name | replace('.', '_') | replace('-', '_') }}"
+
+
+[tool.ruff]
+line-length = 79
+format.quote-style = 'single'
+lint.isort.combine-as-imports = true
+lint.extend-select = [
+    'W605', # invalid-escape-sequence
+    'FA',   # flake8-future-annotations
+    'I',    # isort
+    'UP',   # pyupgrade
+    'RUF',  # Ruff-specific rules (RUF)
+]
+lint.ignore = [
+    'E721',   # Do not compare types, use `isinstance()`
+    'RUF001', # ambiguous-unicode-character-string
+    'RUF002', # ambiguous-unicode-character-docstring
+    'RUF003', # ambiguous-unicode-character-comment
+    'RUF012', # mutable-class-default
+    'RUF059', # Unpacked variable never used
+]
+
+[tool.pytest]
+addopts = ["--quiet", "--tb=short"]
+truncation_limit_lines = '0'
+truncation_limit_chars = '0'
+
+[tool.pyright]
+typeCheckingMode = 'standard'
+reportInvalidStringEscapeSequence = false
+reportConstantRedefinition = 'error'
+reportDeprecated = 'warning'
+reportPropertyTypeMismatch = 'error'
+reportTypeCommentUsage = 'warning'
+reportUnnecessaryCast = 'warning'
+reportUnnecessaryComparison = 'warning'
+reportUnnecessaryContains = 'warning'
+reportUnnecessaryIsInstance = 'warning'
+reportUnnecessaryTypeIgnoreComment = 'warning'
+venvPath = "."
+venv = ".venv"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
