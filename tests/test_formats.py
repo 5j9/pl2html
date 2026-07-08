@@ -317,3 +317,20 @@ def test_fmt_tf_advanced():
         None,
         'yes',
     ]
+
+
+def test_multicolumn_decoration():
+    """Verifies that formatting functions accept list vectors of string columns cleanly."""
+    # Arrange
+    df = DataFrame({'A': [1000.55, 2500000.0], 'B': [0.005, -500.2]})
+
+    # Act
+    # Pass a list of columns to fmt_number instead of a single string
+    expressions = fmt_number(['A', 'B'], decimals=1, use_seps=True)
+
+    assert isinstance(expressions, list)
+    result = df.with_columns(expressions)
+
+    # Assert
+    assert result['A'].to_list() == ['1,000.6', '2,500,000.0']
+    assert result['B'].to_list() == ['0.0', '-500.2']
