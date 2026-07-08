@@ -163,3 +163,90 @@ def fmt_currency(
         accounting=accounting,
         pattern=f'{symbol}{{x}}',
     )
+
+
+def fmt_scientific(
+    column: str,
+    decimals: int = 2,
+    scale_by: float = 1.0,
+    exp_style: _Literal['x10n', 'e', 'E'] = 'x10n',
+    pattern: str = '{x}',
+    force_sign_m: bool = False,
+    force_sign_n: bool = False,
+) -> _Expr:
+    """
+    Highly optimized, native Polars scientific notation formatter matching great_tables features.
+    Runs entirely in the parallel Rust engine without dropping into Python row loops.
+    """
+    val = _col(column)
+    if scale_by != 1.0:
+        val = val * scale_by
+
+    abs_val = val.abs()
+
+    # 1. Calculate the exponent and mantissa using log10
+    log10_expr = _when(abs_val > 0).then(abs_val.log10()).otherwise(_lit(0.0))
+    # Floor to get the correct integer exponent
+    exponent = log10_expr.floor().cast(pl.Int32)
+
+    # Handle the exact zero edge case gracefully
+    exponent = _when(val == 0).then(_lit(0)).otherwise(exponent)
+
+    divisor = _lit(10.0).pow(exponent.cast(pl.Float64))
+    mantissa = val / divisor
+
+    # 2. Format the Mantissa (m) using your decimal padding logic
+    epsilon = _when(mantissa >= 0).then(_lit(1e-9)).otherwise(_lit(-1e-9))
+    rounded_m = (mantissa + epsilon).round(decimals)
+
+    if decimals > 0:
+        int_m = rounded_m.cast(pl.Int64).abs().cast(pl.String)
+        full_str_m = rounded_m.abs().cast(pl.String)
+        frac_m = (
+            _when(full_str_m.str.contains(r'\.'))
+            .then(full_str_m.str.split('.').list.get(1).str.slice(0, decimals))
+            .otherwise(_lit(''))
+        ).str.pad_end(decimals, fill_char='0')
+
+        m_str = int_m + _lit('.') + frac_m
+    else:
+        m_str = rounded_m.round(0).cast(pl.Int64).abs().cast(pl.String)
+
+    # Apply Mantissa signs
+    m_str = (
+        _when(val < 0)
+        .then(_lit('-') + m_str)
+        .when((_lit(force_sign_m)) & (val > 0))
+        .then(_lit('+') + m_str)
+        .otherwise(m_str)
+    )
+
+    # 3. Format the Exponent (n)
+    n_str = exponent.abs().cast(pl.String)
+    n_str = (
+        _when(exponent < 0)
+        .then(_lit('-') + n_str)
+        .when((_lit(force_sign_n)) & (exponent > 0))
+        .then(_lit('+') + n_str)
+        .otherwise(
+            _when(_lit(force_sign_n)).then(_lit('+') + n_str).otherwise(n_str)
+        )
+    )
+
+    # 4. Combine based on exp_style
+    if exp_style == 'x10n':
+        # Matching Great Tables standard: ' × 10^n'
+        combined = m_str + _lit(' × 10^') + n_str
+    elif exp_style == 'E':
+        combined = m_str + _lit('E') + n_str
+    else:
+        combined = m_str + _lit('e') + n_str
+
+    # 5. Extract and apply pattern decorations
+    prefix, suffix = '', ''
+    if pattern != '{x}':
+        parts = pattern.split('{x}')
+        if len(parts) == 2:
+            prefix, suffix = parts[0], parts[1]
+
+    return _lit(prefix) + combined + _lit(suffix)

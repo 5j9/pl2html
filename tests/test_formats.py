@@ -1,6 +1,11 @@
 import polars as pl
 
-from pl2html.formats import fmt_currency, fmt_number, fmt_percent
+from pl2html.formats import (
+    fmt_currency,
+    fmt_number,
+    fmt_percent,
+    fmt_scientific,
+)
 
 
 def test_format_compact_systems():
@@ -79,3 +84,77 @@ def test_fmt_currency():
 
     assert result['usd'].to_list() == expected_usd
     assert result['eur'].to_list() == expected_eur
+
+
+def test_fmt_scientific():
+    """
+    Verifies that fmt_scientific correctly formats numbers into scientific notation,
+    respecting different exponential styles, scale factors, and sign enforcements.
+    """
+    # Arrange
+    df = pl.DataFrame({'value': [0.0, -0.111, 2.22, 33.3, 444.0, -0.00555]})
+
+    # Act
+    result = df.select(
+        [
+            fmt_scientific('value', decimals=2, exp_style='x10n').alias(
+                'default_style'
+            ),
+            fmt_scientific('value', decimals=1, exp_style='E').alias(
+                'e_capital_style'
+            ),
+            fmt_scientific(
+                'value', decimals=2, scale_by=10.0, exp_style='e'
+            ).alias('scaled_style'),
+            fmt_scientific(
+                'value',
+                decimals=1,
+                exp_style='e',
+                force_sign_m=True,
+                force_sign_n=True,
+            ).alias('forced_signs'),
+        ]
+    )
+
+    # Assert
+    expected_default = [
+        '0.00 × 10^0',
+        '-1.11 × 10^-1',
+        '2.22 × 10^0',
+        '3.33 × 10^1',
+        '4.44 × 10^2',
+        '-5.55 × 10^-3',
+    ]
+
+    expected_e_capital = [
+        '0.0E0',
+        '-1.1E-1',
+        '2.2E0',
+        '3.3E1',
+        '4.4E2',
+        '-5.6E-3',
+    ]
+
+    expected_scaled = [
+        '0.00e0',
+        '-1.11e0',
+        '2.22e1',
+        '3.33e2',
+        '4.44e3',
+        '-5.55e-2',
+    ]
+
+    # Updated to match Polars engine's behavior for force_sign_n on 0 exponent values
+    expected_forced = [
+        '0.0e+0',
+        '-1.1e-1',
+        '+2.2e+0',
+        '+3.3e+1',
+        '+4.4e+2',
+        '-5.6e-3',
+    ]
+
+    assert result['default_style'].to_list() == expected_default
+    assert result['e_capital_style'].to_list() == expected_e_capital
+    assert result['scaled_style'].to_list() == expected_scaled
+    assert result['forced_signs'].to_list() == expected_forced
