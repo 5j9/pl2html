@@ -49,7 +49,7 @@ print(html_table_string)
 ```
 
 
-Result:
+Output:
 
 <table>
   <thead>
@@ -109,7 +109,7 @@ styles.update(
 html_table = to_html(df, attrs=styles).collect().item()
 ```
 
-Result:
+Output:
 
 <table>
   <thead>
@@ -129,22 +129,65 @@ Result:
 
 ---
 
+
+### 3. Compact Engineering & Financial Formatting
+Using `format_compact`, you can scale large numbers into clean suffixes (like `K`/`M`/`B` or `k`/`M`/`G`) natively. This is ideal for cleaning up cluttered financial or scientific columns before compiling them.
+
+```python
+import polars as pl
+from pl2html import to_html
+from pl2html.formats import format_compact
+
+df = pl.DataFrame({
+    "asset": ["Bitcoin", "Ethereum", "Solana"],
+    "volume_usd": [45000000000.0, 18200000000.0, 950000.0]
+})
+
+# Apply the format directly as a native Polars transformation expression
+df_formatted = df.with_columns(
+    format_compact("volume_usd", decimals=1, system="financial")
+)
+
+# Compile to clean, readable HTML
+html_table = to_html(df_formatted).collect().item()
+```
+
+Output:
+
+<table>
+  <thead>
+    <tr>
+      <th>asset</th>
+      <th>volume_usd</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>Bitcoin</td><td>45.0B</td></tr>
+    <tr><td>Ethereum</td><td>18.2B</td></tr>
+    <tr><td>Solana</td><td>950.0K</td></tr>
+  </tbody>
+</table>
+
 ## Architecture & Module Layout
 
-The library is explicitly divided into two decoupled layers:
+The library is explicitly divided into three decoupled layers:
 
-### 1. Core Compiler (`__init__.py`)
-Responsible for reading the dataframe schema, iterating horizontally over visible columns, and joining tokens structural row arrays. 
-* Exposes `to_html(df, *, attrs=None, exclude_columns=None)`
+### 1. Core Compiler (`compiler.py`)
+Responsible for reading the dataframe schema, iterating horizontally over visible columns, and joining tokens into structural row arrays. 
+* Exposed via `to_html(df, *, attrs=None, exclude_columns=None)` in `__init__.py`.
 * Automatically assigns high-performance format fallbacks:
   * `is_integer()`: Applies thousands separator reversals.
   * `is_float()`: Automatically base-truncates decimal positions and breaks layout chunks smoothly.
   * *Catchall*: Direct pass through `_escape_polars_string()` to secure against cross-site scripting (XSS).
 
-### 2. Style Utilities (`styles.py`)
-Generates structural Polars expression payloads mapped to specific HTML components.
-* `data_color(column, palette, domain=None, auto_contrast=True)`: Evaluates column boundaries (`.min()` / `.max()`) lazily and maps specific row values via piece-wise linear rgb calculations.
-* `rank_color(column, palette, descending=False, auto_contrast=True)`: Replaces absolute numerical scaling with ordinal ranks. Excellent for smoothing out heavily skewed datasets or extreme outliers.
+### 2. Format Expressions (`formats.py`)
+Contains native string-shaping expression generators to cleanly display large datasets without dropping into slow Python loops.
+* `format_compact(column, decimals=2, system="financial")`: Evaluates base-10 logarithms lazily to scale numbers into clean thousands-exponent buckets. Supports `"financial"` notation (K, M, B, T) and International Standard `"engineering"` SI metric units (k, M, G, T).
+
+### 3. Style Utilities (`styles.py`)
+Generates structural Polars expression payloads mapped to specific HTML style attributes.
+* `data_color(column, palette, domain=None, auto_contrast=True)`: Evaluates column boundaries (`.min()` / `.max()`) at evaluation time and maps row values via piece-wise linear RGB interpolation.
+* `rank_color(column, palette, descending=False, auto_contrast=True)`: Replaces absolute numerical scaling with ordinal percentile ranks to smooth out heavily skewed datasets or extreme outliers.
 
 ---
 
