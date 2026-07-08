@@ -4,10 +4,8 @@ from polars import (
     Expr as _Expr,
     LazyFrame as _LazyFrame,
     String as _String,
-    arange as _arange,
     col as _col,
     concat_str as _concat_str,
-    len as _len,
     lit as _lit,
     when as _when,
 )
@@ -112,12 +110,8 @@ def _build_cell_expr(
     return opening_td + fmt_expr + _lit('</td>')
 
 
-def _build_html_skeleton(
-    visible_columns: list[str], add_row_no: bool
-) -> tuple[_Expr, _Expr]:
+def _build_html_skeleton(visible_columns: list[str]) -> tuple[_Expr, _Expr]:
     header_parts = ['<table>', '  <thead>\n    <tr>']
-    if add_row_no:
-        header_parts.append('      <th>#</th>')
     for c in visible_columns:
         header_parts.append(f'      <th>{c}</th>')
     header_parts.append('    </tr>\n  </thead>\n  <tbody>')
@@ -132,7 +126,6 @@ def to_html(
     *,
     attrs: dict[str, dict[str, _Expr]] | None = None,
     exclude_columns: list[str] | None = None,
-    add_row_no: bool = True,
 ) -> _LazyFrame:
     """
     Compiles a Polars DataFrame safely into an HTML string layout.
@@ -148,15 +141,6 @@ def to_html(
 
     cell_expressions = []
 
-    # 1. Row Index Element Processing
-    if add_row_no:
-        index_expr = (
-            _lit('<td>')
-            + (_arange(1, _len() + 1).cast(_String))
-            + _lit('</td>')
-        )
-        cell_expressions.append(index_expr)
-
     # 2. Map structural cell loops
     for c in visible_columns:
         cell_expressions.append(_build_cell_expr(c, schema[c], attrs))
@@ -165,9 +149,7 @@ def to_html(
     row_expr = _lit('    <tr>') + _concat_str(cell_expressions) + _lit('</tr>')
 
     # 4. Generate wrappers and frame the query graph
-    html_header, html_footer = _build_html_skeleton(
-        visible_columns, add_row_no
-    )
+    html_header, html_footer = _build_html_skeleton(visible_columns)
 
     return lf.select(row_expr.alias('html_row')).select(
         (html_header + _col('html_row').str.join('\n') + html_footer).alias(

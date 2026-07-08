@@ -10,7 +10,7 @@ def test_basic_table_compilation(expected_html):
     # This automatically loads: html_fixtures/test_basic_table_compilation.html
     df = pl.DataFrame({'id': [1, 2], 'name': ['Alice', 'Bob']})
 
-    actual_html = to_html(df, add_row_no=False).collect().item().strip()
+    actual_html = to_html(df).collect().item().strip()
     assert normalize_html(actual_html) == expected_html
 
 
@@ -18,7 +18,7 @@ def test_integer_thousands_separator(expected_html):
     # This automatically loads: html_fixtures/test_integer_thousands_separator.html
     df = pl.DataFrame({'large_numbers': [1000, 1000000]})
 
-    actual_html = to_html(df, add_row_no=False).collect().item().strip()
+    actual_html = to_html(df).collect().item().strip()
     assert normalize_html(actual_html) == expected_html
 
 
@@ -36,7 +36,7 @@ def test_float_rounding_and_formatting(expected_html):
     )
 
     # Act: Generate the lazy HTML tree and collect the string result
-    actual_html = to_html(df, add_row_no=False).collect().item().strip()
+    actual_html = to_html(df).collect().item().strip()
 
     assert normalize_html(actual_html) == expected_html
 
@@ -59,7 +59,7 @@ def test_large_float_thousands_separator(expected_html):
     )
 
     # Act
-    actual_html = to_html(df, add_row_no=False).collect().item().strip()
+    actual_html = to_html(df).collect().item().strip()
     assert normalize_html(actual_html) == expected_html
 
 
@@ -94,7 +94,6 @@ def test_format_overrides_custom_expressions(expected_html):
         to_html(
             df,
             attrs=custom_attrs,
-            add_row_no=False,
         )
         .collect()
         .item()
@@ -127,6 +126,6 @@ def test_temporal_columns_handling(expected_html):
     )
 
     # Act
-    actual_html = to_html(df, add_row_no=False).collect().item().strip()
+    actual_html = to_html(df).collect().item().strip()
 
     assert normalize_html(actual_html) == expected_html
