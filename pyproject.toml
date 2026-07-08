@@ -62,5 +62,6 @@ venv = ".venv"
 
 [dependency-groups]
 dev = [
+    "matplotlib>=3.11.0",
     "pytest>=9.1.1",
 ]
