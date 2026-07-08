@@ -1,9 +1,21 @@
-import polars as pl
+from polars import (
+    DataFrame as _DataFrame,
+    DataType as _DataType,
+    Expr as _Expr,
+    LazyFrame as _LazyFrame,
+    String as _String,
+    arange as _arange,
+    col as _col,
+    concat_str as _concat_str,
+    len as _len,
+    lit as _lit,
+    when as _when,
+)
 
 __version__ = '0.1.1.dev1'
 
 
-def _escape_polars_string(col_name: str) -> pl.Expr:
+def _escape_polars_string(col_name: str) -> _Expr:
     """
     Escapes a column's string representations for secure HTML compatibility.
     Because standard HTML entities use look-arounds or loops, we can fall back to
@@ -11,8 +23,8 @@ def _escape_polars_string(col_name: str) -> pl.Expr:
     but basic safety replaces characters sequentially.
     """
     return (
-        pl.col(col_name)
-        .cast(pl.String)
+        _col(col_name)
+        .cast(_String)
         .str.replace_all('&', '&amp;')
         .str.replace_all('<', '&lt;')
         .str.replace_all('>', '&gt;')
@@ -21,12 +33,12 @@ def _escape_polars_string(col_name: str) -> pl.Expr:
     )
 
 
-def _format_integer(col_name: str) -> pl.Expr:
+def _format_integer(col_name: str) -> _Expr:
     """Adds thousands separators to integers using look-around-free logic."""
     return (
-        pl.col(col_name)
+        _col(col_name)
         .fill_null(0)
-        .cast(pl.String)
+        .cast(_String)
         .str.reverse()
         .str.replace_all(r'\d{3}', '$0,')
         .str.reverse()
@@ -35,9 +47,9 @@ def _format_integer(col_name: str) -> pl.Expr:
     )
 
 
-def _format_float(col_name: str) -> pl.Expr:
+def _format_float(col_name: str) -> _Expr:
     """Formats floats with 3 decimals and thousands separators."""
-    rounded_str = pl.col(col_name).round(3).cast(pl.String)
+    rounded_str = _col(col_name).round(3).cast(_String)
     int_part = rounded_str.str.split_exact('.', 1).struct.field('field_0')
     dec_part = rounded_str.str.split_exact('.', 1).struct.field('field_1')
 
@@ -50,17 +62,17 @@ def _format_float(col_name: str) -> pl.Expr:
     )
 
     return (
-        pl.when(dec_part.is_not_null() & (dec_part != ''))
-        .then(formatted_int + pl.lit('.') + dec_part)
+        _when(dec_part.is_not_null() & (dec_part != ''))
+        .then(formatted_int + _lit('.') + dec_part)
         .otherwise(formatted_int)
     )
 
 
 def _build_cell_expr(
     col_name: str,
-    dtype: pl.DataType,
-    attrs: dict[str, dict[str, pl.Expr]],
-) -> pl.Expr:
+    dtype: _DataType,
+    attrs: dict[str, dict[str, _Expr]],
+) -> _Expr:
     """
     Applies secure auto-escaping or data formatting overrides, then dynamically
     compiles HTML attributes into a valid single opening <td> tag block.
@@ -81,30 +93,28 @@ def _build_cell_expr(
         for attr_name, val_expr in attrs[col_name].items():
             # If the expression returns null or empty for a specific row, skip writing the attribute
             compiled_attr = (
-                pl.when(val_expr.is_not_null() & (val_expr != ''))
+                _when(val_expr.is_not_null() & (val_expr != ''))
                 .then(
-                    pl.lit(f' {attr_name}="')
-                    + val_expr.cast(pl.String)
-                    + pl.lit('"')
+                    _lit(f' {attr_name}="')
+                    + val_expr.cast(_String)
+                    + _lit('"')
                 )
-                .otherwise(pl.lit(''))
+                .otherwise(_lit(''))
             )
             attr_expr_list.append(compiled_attr)
 
     # Combine attribute strings together
     if attr_expr_list:
-        opening_td = (
-            pl.lit('<td') + pl.concat_str(attr_expr_list) + pl.lit('>')
-        )
+        opening_td = _lit('<td') + _concat_str(attr_expr_list) + _lit('>')
     else:
-        opening_td = pl.lit('<td>')
+        opening_td = _lit('<td>')
 
-    return opening_td + fmt_expr + pl.lit('</td>')
+    return opening_td + fmt_expr + _lit('</td>')
 
 
 def _build_html_skeleton(
     visible_columns: list[str], add_row_no: bool
-) -> tuple[pl.Expr, pl.Expr]:
+) -> tuple[_Expr, _Expr]:
     header_parts = ['<table>', '  <thead>\n    <tr>']
     if add_row_no:
         header_parts.append('      <th>#</th>')
@@ -112,23 +122,23 @@ def _build_html_skeleton(
         header_parts.append(f'      <th>{c}</th>')
     header_parts.append('    </tr>\n  </thead>\n  <tbody>')
 
-    html_header = pl.lit('\n'.join(header_parts) + '\n')
-    html_footer = pl.lit('\n  </tbody>\n</table>')
+    html_header = _lit('\n'.join(header_parts) + '\n')
+    html_footer = _lit('\n  </tbody>\n</table>')
     return html_header, html_footer
 
 
 def to_html(
-    df: pl.DataFrame | pl.LazyFrame,
+    df: _DataFrame | _LazyFrame,
     *,
-    attrs: dict[str, dict[str, pl.Expr]] | None = None,
+    attrs: dict[str, dict[str, _Expr]] | None = None,
     exclude_columns: list[str] | None = None,
     add_row_no: bool = True,
-) -> pl.LazyFrame:
+) -> _LazyFrame:
     """
     Compiles a Polars DataFrame safely into an HTML string layout.
     Accepts structural custom attributes mappings to handle layout modifications natively.
     """
-    lf = df.lazy() if isinstance(df, pl.DataFrame) else df
+    lf = df.lazy() if isinstance(df, _DataFrame) else df
 
     exclude_columns = exclude_columns or []
     attrs = attrs or {}
@@ -141,9 +151,9 @@ def to_html(
     # 1. Row Index Element Processing
     if add_row_no:
         index_expr = (
-            pl.lit('<td>')
-            + (pl.arange(1, pl.len() + 1).cast(pl.String))
-            + pl.lit('</td>')
+            _lit('<td>')
+            + (_arange(1, _len() + 1).cast(_String))
+            + _lit('</td>')
         )
         cell_expressions.append(index_expr)
 
@@ -152,9 +162,7 @@ def to_html(
         cell_expressions.append(_build_cell_expr(c, schema[c], attrs))
 
     # 3. Concatenate columns horizontally into rows
-    row_expr = (
-        pl.lit('    <tr>') + pl.concat_str(cell_expressions) + pl.lit('</tr>')
-    )
+    row_expr = _lit('    <tr>') + _concat_str(cell_expressions) + _lit('</tr>')
 
     # 4. Generate wrappers and frame the query graph
     html_header, html_footer = _build_html_skeleton(
@@ -162,7 +170,7 @@ def to_html(
     )
 
     return lf.select(row_expr.alias('html_row')).select(
-        (html_header + pl.col('html_row').str.join('\n') + html_footer).alias(
+        (html_header + _col('html_row').str.join('\n') + html_footer).alias(
             'html_table'
         )
     )
