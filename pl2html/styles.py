@@ -1,10 +1,10 @@
-from matplotlib import colormaps as _colormaps
-from matplotlib.colors import to_hex as _to_hex
 from polars import (
     Expr as _Expr,
+    Float64 as _Float64,
     Int32 as _Int32,
     String as _String,
     col as _col,
+    len as _len,
     lit as _lit,
     when as _when,
 )
@@ -125,17 +125,55 @@ def data_color(
     return {column: {'style': chain.otherwise(_lit(''))}}
 
 
-def data_color_cmap(
+def rank_color(
     column: str,
-    cmap_name: str,
-    num_colors: int = 10,
-    domain: tuple[float, float] | None = None,
-    auto_contrast: bool = True,  # <-- Pass through
+    palette: list[str],
+    descending: bool = False,
+    auto_contrast: bool = True,
 ) -> dict[str, dict[str, _Expr]]:
-    """Optional helper using matplotlib to sample named colormaps securely."""
-    cmap = _colormaps[cmap_name]
-    palette = [_to_hex(cmap(i / (num_colors - 1))) for i in range(num_colors)]
+    """
+    Generates a style attribute expression mapping values in a column to a hex color palette
+    based on their ordinal rank rather than their absolute value.
+    """
+    if len(palette) < 2:
+        raise ValueError(
+            'Palette must contain at least 2 colors for interpolation.'
+        )
 
-    return data_color(
-        column, palette, domain=domain, auto_contrast=auto_contrast
+    # 1. Dynamically compute the ordinal rank (1-indexed) inside Polars
+    # Subtract 1 to make it 0-indexed: [0, n-1]
+    rank_expr = _col(column).rank(method='ordinal', descending=descending) - 1
+
+    # 2. Safely normalize the rank between 0.0 and 1.0 based on dataset size
+    # norm = rank / (total_rows - 1)
+    total_rows_minus_1 = _len().cast(_Float64) - 1.0
+
+    norm_val = (
+        _when(total_rows_minus_1 <= 0)
+        .then(_lit(0.0))
+        .otherwise(rank_expr.cast(_Float64) / total_rows_minus_1)
     )
+
+    num_segments = len(palette) - 1
+    segment_width = 1.0 / num_segments
+
+    # 3. Reuse our optimized piece-wise interpolation pipeline
+    r, g, b = _interpolate_segment(
+        norm_val, palette[0], palette[1], 0.0, segment_width
+    )
+    chain = _when(norm_val <= segment_width).then(
+        _build_css_expression(r, g, b, auto_contrast)
+    )
+
+    for i in range(1, num_segments):
+        seg_start = i * segment_width
+        seg_end = (i + 1) * segment_width
+
+        r, g, b = _interpolate_segment(
+            norm_val, palette[i], palette[i + 1], seg_start, segment_width
+        )
+        chain = chain.when(norm_val <= seg_end).then(
+            _build_css_expression(r, g, b, auto_contrast)
+        )
+
+    return {column: {'style': chain.otherwise(_lit(''))}}
