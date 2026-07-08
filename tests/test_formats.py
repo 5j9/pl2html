@@ -1,11 +1,15 @@
-import polars as pl
+from polars import DataFrame
 
 from pl2html.formats import (
     fmt_bytes,
     fmt_currency,
+    fmt_integer,
     fmt_number,
     fmt_percent,
     fmt_scientific,
+    fmt_tf,
+    sub_missing,
+    sub_zero,
 )
 
 
@@ -15,9 +19,7 @@ def test_format_compact_systems():
     and splits suffixes between financial (K, M, B) and engineering (k, M, G).
     """
     # Arrange
-    df = pl.DataFrame(
-        {'value': [0.0, -950.0, 12500.0, 4800000.0, 3100000000.0]}
-    )
+    df = DataFrame({'value': [0.0, -950.0, 12500.0, 4800000.0, 3100000000.0]})
 
     # Act
     result = df.select(
@@ -42,7 +44,7 @@ def test_format_compact_systems():
 def test_fmt_percent():
     """Verifies that fmt_percent scales values by 100 and appends % suffix."""
     # Arrange
-    df = pl.DataFrame({'rates': [0.0523, -0.12, 1.0]})
+    df = DataFrame({'rates': [0.0523, -0.12, 1.0]})
 
     # Act
     result = df.select(
@@ -57,7 +59,7 @@ def test_fmt_percent():
 def test_fmt_currency():
     """Verifies currency symbols and accounting style formatting for negatives."""
     # Arrange
-    df = pl.DataFrame({'amount': [1250.5, -450.0, 0.0]})
+    df = DataFrame({'amount': [1250.5, -450.0, 0.0]})
 
     # Act
     result = df.select(
@@ -93,7 +95,7 @@ def test_fmt_scientific():
     respecting different exponential styles, scale factors, and sign enforcements.
     """
     # Arrange
-    df = pl.DataFrame({'value': [0.0, -0.111, 2.22, 33.3, 444.0, -0.00555]})
+    df = DataFrame({'value': [0.0, -0.111, 2.22, 33.3, 444.0, -0.00555]})
 
     # Act
     result = df.select(
@@ -167,7 +169,7 @@ def test_fmt_bytes():
     supporting both decimal (1000) and binary (1024) tracking modes.
     """
     # Arrange
-    df = pl.DataFrame(
+    df = DataFrame(
         {'value': [0.0, 444.0, 5500.0, 777000.0, 8900000.0, -1048576.0]}
     )
 
@@ -222,3 +224,96 @@ def test_fmt_bytes():
     assert result['decimal_std'].to_list() == expected_decimal
     assert result['binary_std'].to_list() == expected_binary
     assert result['compressed_signed'].to_list() == expected_compressed_signed
+
+
+def test_fmt_integer_and_substitution_helpers():
+    """
+    Verifies integer formatting rules (no decimals, thousand separators)
+    and checks conditional substitution helpers (sub_missing, sub_zero, fmt_tf).
+    """
+    # Arrange
+    df = DataFrame(
+        {
+            'integers': [0, -1500, 2500000, None],
+            'booleans': [True, False, True, None],
+            'missing_mix': [1.23, None, 0.0, 4.56],
+            'zeros_mix': [0.0, -0.0, 10.5, 0.0],
+        }
+    )
+
+    # Act
+    result = df.select(
+        [
+            fmt_integer('integers', use_seps=True).alias('int_standard'),
+            fmt_integer(
+                'integers', compact=True, compact_system='financial'
+            ).alias('int_compact'),
+            fmt_tf('booleans', true_val='Yes', false_val='No').alias(
+                'tf_custom'
+            ),
+            sub_missing('missing_mix', missing_text='N/A').alias(
+                'missing_replaced'
+            ),
+            sub_zero('zeros_mix', zero_text='-').alias('zeros_replaced'),
+        ]
+    )
+
+    # Assert
+    expected_int_standard = ['0', '-1,500', '2,500,000', None]
+
+    # -1500 becomes -1.5 -> rounded away from zero via epsilon -> -2K
+    expected_int_compact = ['0', '-2K', '3M', None]
+
+    expected_tf = ['Yes', 'No', 'Yes', None]
+    expected_missing = ['1.23', 'N/A', '0.0', '4.56']
+    expected_zeros = ['-', '-', '10.5', '-']
+
+    assert result['int_standard'].to_list() == expected_int_standard
+    assert result['int_compact'].to_list() == expected_int_compact
+    assert result['tf_custom'].to_list() == expected_tf
+    assert result['missing_replaced'].to_list() == expected_missing
+    assert result['zeros_replaced'].to_list() == expected_zeros
+
+
+def test_fmt_tf_advanced():
+    """
+    Verifies that fmt_tf correctly resolves style presets, honors explicit overrides,
+    injects patterns cleanly, and replaces null markers if na_val is provided.
+    """
+    # Arrange
+    df = DataFrame({'status': [True, False, None, True]})
+
+    # Act
+    result = df.select(
+        [
+            # Test preset styles with explicit na_val substitution
+            fmt_tf('status', tf_style='arrows', na_val='—').alias(
+                'arrows_with_na'
+            ),
+            # Test custom true/false override values alongside a text pattern wrapper
+            fmt_tf(
+                'status',
+                true_val='Active',
+                false_val='Inactive',
+                pattern='[{x}]',
+                na_val='Missing',
+            ).alias('custom_override'),
+            # Test standard default behavior without na_val handling (retains null)
+            fmt_tf('status', tf_style='yes-no').alias('default_retains_null'),
+        ]
+    )
+
+    # Assert
+    assert result['arrows_with_na'].to_list() == ['↑', '↓', '—', '↑']
+    assert result['custom_override'].to_list() == [
+        '[Active]',
+        '[Inactive]',
+        'Missing',
+        '[Active]',
+    ]
+    assert result['default_retains_null'].to_list() == [
+        'yes',
+        'no',
+        None,
+        'yes',
+    ]

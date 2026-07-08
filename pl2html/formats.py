@@ -378,3 +378,110 @@ def fmt_bytes(
             prefix, suffix = parts[0], parts[1]
 
     return _lit(prefix) + combined + _lit(suffix)
+
+
+def fmt_tf(
+    column: str,
+    tf_style: _Literal[
+        'true-false',
+        'yes-no',
+        'up-down',
+        'check-mark',
+        'circles',
+        'squares',
+        'diamonds',
+        'arrows',
+        'triangles',
+        'triangles-lr',
+    ] = 'true-false',
+    pattern: str = '{x}',
+    true_val: str | None = None,
+    false_val: str | None = None,
+    na_val: str | None = None,
+) -> _Expr:
+    """
+    Highly optimized, native Polars boolean formatter matching great_tables features.
+    Maps booleans to text/symbols, overrides via custom labels, and handles null values safely.
+    """
+    # 1. Map tf_style presets
+    style_map = {
+        'true-false': ('true', 'false'),
+        'yes-no': ('yes', 'no'),
+        'up-down': ('up', 'down'),
+        'check-mark': ('✓', '✗'),
+        'circles': ('●', '○'),
+        'squares': ('■', '□'),
+        'diamonds': ('◆', '◇'),
+        'arrows': ('↑', '↓'),
+        'triangles': ('▲', '▼'),
+        'triangles-lr': ('▶', '◀'),
+    }
+
+    preset_true, preset_false = style_map.get(tf_style, ('true', 'false'))
+
+    # 2. Apply explicit user overrides if provided
+    final_true = true_val if true_val is not None else preset_true
+    final_false = false_val if false_val is not None else preset_false
+
+    # 3. Form conditional mapping expression
+    base_expr = (
+        _when(_col(column)).then(_lit(final_true)).otherwise(_lit(final_false))
+    )
+
+    # 4. Handle pattern mapping
+    prefix, suffix = '', ''
+    if pattern != '{x}':
+        parts = pattern.split('{x}')
+        if len(parts) == 2:
+            prefix, suffix = parts[0], parts[1]
+
+    formatted_expr = _lit(prefix) + base_expr + _lit(suffix)
+
+    # 5. Handle missing value overrides safely (nulls shouldn't get pattern prefixes/suffixes)
+    if na_val is not None:
+        return (
+            _when(_col(column).is_null())
+            .then(_lit(na_val))
+            .otherwise(formatted_expr)
+        )
+    else:
+        return (
+            _when(_col(column).is_null())
+            .then(_lit(None))
+            .otherwise(formatted_expr)
+        )
+
+
+def sub_missing(column: str, missing_text: str = '—') -> _Expr:
+    return _col(column).fill_null(_lit(missing_text))
+
+
+def sub_zero(column: str, zero_text: str = '—') -> _Expr:
+    return (
+        _when(_col(column) == 0).then(_lit(zero_text)).otherwise(_col(column))
+    )
+
+
+def fmt_integer(
+    column: str,
+    scale_by: float = 1.0,
+    compact: bool = False,
+    compact_system: _Literal['financial', 'engineering'] = 'financial',
+    use_seps: bool = True,
+    accounting: bool = False,
+    pattern: str = '{x}',
+) -> _Expr:
+    """
+    Highly optimized, native Polars integer formatter.
+    Wraps fmt_number forcing decimals=0 to keep rendering purely in Rust.
+    """
+    return fmt_number(
+        column=column,
+        decimals=0,
+        scale_by=scale_by,
+        compact=compact,
+        compact_system=compact_system,
+        use_seps=use_seps,
+        accounting=accounting,
+        pattern=pattern,
+    )
