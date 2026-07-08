@@ -1,3 +1,7 @@
+[build-system]
+requires = ['uv_build>=0.8.3,<0.9.0']
+build-backend = 'uv_build'
+
 [project]
 name = "pl2html"
 version = "0.1.0"
@@ -13,7 +17,7 @@ GitHub = "https://github.com/5j9/pl2html"
 
 [tool.uv.build-backend]
 module-root = ''
-module-name = "{{ cookiecutter.project_name | replace('.', '_') | replace('-', '_') }}"
+module-name = "pl2html"
 
 
 [tool.ruff]
