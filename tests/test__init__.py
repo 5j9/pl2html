@@ -1,3 +1,5 @@
+from datetime import date, datetime
+
 import polars as pl
 
 from pl2html import to_html
@@ -98,5 +100,33 @@ def test_format_overrides_custom_expressions(expected_html):
         .item()
         .strip()
     )
+
+    assert normalize_html(actual_html) == expected_html
+
+
+def test_temporal_columns_handling(expected_html):
+    """
+    Verifies that Date and Datetime columns are cleanly handled,
+    even when pre-formatted as strings or when left to the default
+    string conversion fallback.
+    """
+    # Arrange: Create a DataFrame with native Date, Datetime, and pre-formatted strings
+    df = pl.DataFrame(
+        {
+            'event_date': [date(2026, 1, 1), date(2026, 12, 31)],
+            'timestamp': [
+                datetime(2026, 7, 8, 12, 0, 0),
+                datetime(2026, 7, 8, 23, 59, 59),
+            ],
+            # Simulating how a user might pre-format custom date formats themselves
+            'custom_format': [
+                datetime(2026, 5, 15, 14, 30).strftime('%B %d, %Y'),
+                datetime(2026, 10, 31, 18, 0).strftime('%B %d, %Y'),
+            ],
+        }
+    )
+
+    # Act
+    actual_html = to_html(df, add_row_no=False).collect().item().strip()
 
     assert normalize_html(actual_html) == expected_html
