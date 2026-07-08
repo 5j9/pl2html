@@ -1,6 +1,7 @@
 import polars as pl
 
 from pl2html.formats import (
+    fmt_bytes,
     fmt_currency,
     fmt_number,
     fmt_percent,
@@ -158,3 +159,66 @@ def test_fmt_scientific():
     assert result['e_capital_style'].to_list() == expected_e_capital
     assert result['scaled_style'].to_list() == expected_scaled
     assert result['forced_signs'].to_list() == expected_forced
+
+
+def test_fmt_bytes():
+    """
+    Verifies that fmt_bytes accurately parses raw integers into human-readable bytes scale,
+    supporting both decimal (1000) and binary (1024) tracking modes.
+    """
+    # Arrange
+    df = pl.DataFrame(
+        {'value': [0.0, 444.0, 5500.0, 777000.0, 8900000.0, -1048576.0]}
+    )
+
+    # Act
+    result = df.select(
+        [
+            # Test default decimal standard with space
+            fmt_bytes('value', decimals=1, standard='decimal').alias(
+                'decimal_std'
+            ),
+            # Test binary standard with space
+            fmt_bytes('value', decimals=1, standard='binary').alias(
+                'binary_std'
+            ),
+            # Test binary standard without intervening space and forced sign
+            fmt_bytes(
+                'value',
+                decimals=2,
+                standard='binary',
+                incl_space=False,
+                force_sign=True,
+            ).alias('compressed_signed'),
+        ]
+    )
+
+    # Assert
+    expected_decimal = [
+        '0.0 B',
+        '444.0 B',
+        '5.5 kB',
+        '777.0 kB',
+        '8.9 MB',
+        '-1.0 MB',
+    ]
+    expected_binary = [
+        '0.0 B',
+        '444.0 B',
+        '5.4 KiB',
+        '758.8 KiB',
+        '8.5 MiB',
+        '-1.0 MiB',
+    ]
+    expected_compressed_signed = [
+        '0.00B',
+        '+444.00B',
+        '+5.37KiB',
+        '+758.79KiB',
+        '+8.49MiB',
+        '-1.00MiB',
+    ]
+
+    assert result['decimal_std'].to_list() == expected_decimal
+    assert result['binary_std'].to_list() == expected_binary
+    assert result['compressed_signed'].to_list() == expected_compressed_signed
