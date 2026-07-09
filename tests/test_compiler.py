@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from polars import DataFrame, Float64, String, col, lit, when
 
-from pl2html import to_html
+from pl2html.compiler import to_html
 from pl2html.formats import fmt_number
 from tests import normalize_html
 

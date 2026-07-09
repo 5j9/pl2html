@@ -1,6 +1,6 @@
 from polars import DataFrame
 
-from pl2html import to_html
+from pl2html.compiler import to_html
 from pl2html.styles import data_color, rank_color
 from tests import normalize_html
 

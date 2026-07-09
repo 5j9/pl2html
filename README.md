@@ -31,7 +31,7 @@ By default, `pl2html` infers datatypes to securely render human-readable tables.
 
 ```python
 import polars as pl
-from pl2html import to_html
+from pl2html.compiler import to_html
 
 df = pl.DataFrame(
     {
@@ -69,7 +69,7 @@ Output:
 
 ```python
 import polars as pl
-from pl2html import to_html
+from pl2html.compiler import to_html
 from pl2html import formats as fmt
 
 df = pl.DataFrame(
@@ -98,7 +98,7 @@ Instead of embedding hacky structural HTML tags in your data, use the `attrs` pa
 
 ```python
 import polars as pl
-from pl2html import to_html
+from pl2html.compiler import to_html
 from pl2html.styles import data_color, rank_color
 
 df = pl.DataFrame(
@@ -158,7 +158,7 @@ Output (github may override table colors, but they are there):
 
 The library is explicitly divided into three decoupled layers:
 
-### 1. Core Compiler (`__init__.py`)
+### 1. Core Compiler (`compiler.py`)
 Responsible for reading the dataframe schema, iterating horizontally over visible columns, and joining tokens into structural row arrays natively in Rust. 
 * Exposed via `to_html(df, *, attrs=None, exclude_columns=None)`.
 * Automatically assigns high-performance format fallbacks:
