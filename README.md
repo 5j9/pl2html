@@ -42,10 +42,8 @@ df = pl.DataFrame(
 )
 
 # Compiles safely to a Polars LazyFrame containing the HTML output
-html_lazy = to_html(df)
+html_table_string = to_html(df)
 
-# Collect and extract the compiled string
-html_table_string = html_lazy.collect().item()
 print(html_table_string)
 ```
 
@@ -92,7 +90,7 @@ df_f = df.with_columns(
     fmt.sub_zero("status_code", zero_text="OK")
 )
 
-html = to_html(df_f).collect().item()
+html = to_html(df_f)
 ```
 
 ### 3. Advanced Styling via Native Attributes (`attrs`)
@@ -132,7 +130,7 @@ styles.update(
     )
 )
 
-html_table = to_html(df, attrs=styles).collect().item()
+html_table = to_html(df, attrs=styles)
 ```
 
 Output (github may override table colors, but they are there):

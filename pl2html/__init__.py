@@ -126,7 +126,7 @@ def to_html(
     *,
     attrs: dict[str, dict[str, _Expr]] | None = None,
     exclude_columns: list[str] | None = None,
-) -> _LazyFrame:
+) -> str:
     """
     Compiles a Polars DataFrame safely into an HTML string layout.
     Accepts structural custom attributes mappings to handle layout modifications natively.
@@ -151,8 +151,14 @@ def to_html(
     # 4. Generate wrappers and frame the query graph
     html_header, html_footer = _build_html_skeleton(visible_columns)
 
-    return lf.select(row_expr.alias('html_row')).select(
-        (html_header + _col('html_row').str.join('\n') + html_footer).alias(
-            'html_table'
+    # 5. Execute the query graph and pull out the raw python string directly
+    return (
+        lf.select(row_expr.alias('html_row'))
+        .select(
+            (
+                html_header + _col('html_row').str.join('\n') + html_footer
+            ).alias('html_table')
         )
+        .collect()
+        .item()
     )

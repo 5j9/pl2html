@@ -23,7 +23,7 @@ def test_styled_output_generation(expected_html):
     attrs_config = {}
     attrs_config.update(amount_styles)
 
-    actual_html = to_html(df, attrs=attrs_config).collect().item()
+    actual_html = to_html(df, attrs=attrs_config)
     assert normalize_html(actual_html) == expected_html
 
 
@@ -42,7 +42,7 @@ def test_data_color_auto_contrast_switching(expected_html):
     )
 
     # Act
-    actual_html = to_html(df, attrs=style_config).collect().item().strip()
+    actual_html = to_html(df, attrs=style_config)
 
     # Assert
     assert normalize_html(actual_html) == expected_html
@@ -65,7 +65,7 @@ def test_rank_color_interpolation(expected_html):
     )
 
     # Act
-    actual_html = to_html(df, attrs=style_config).collect().item().strip()
+    actual_html = to_html(df, attrs=style_config)
 
     # Assert
     assert normalize_html(actual_html) == expected_html
