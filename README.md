@@ -196,3 +196,13 @@ Generates structural Polars expression payloads mapped to specific HTML style at
 .str.replace_all('"', '&quot;')
 .str.replace_all("'", '&#x27;')
 ```
+
+### Design Inspiration & Why This Library Exists
+
+Most of the API design and formatting parameters in this library are heavily inspired by [great-tables](https://posit-dev.github.io/great-tables/reference/). If you are looking for detailed descriptions or conceptual overviews of specific formatting arguments, the `great-tables` reference documentation serves as an excellent companion guide. 
+
+However, this library was born out of distinct architectural and environment constraints:
+
+* **Zero Overhead Styling:** While `great-tables` is incredibly feature-rich, it often produces dense HTML styles and boilerplate structures that were unnecessary for the target use cases. This library optimizes for minimal, highly clean HTML output.
+* **Modern Python Compatibility (Py 3.14+):** `great-tables` pulls in heavy external dependencies, including binary wheels like `multimark`. At the time of development, these dependencies did not support Python 3.14. To unblock workflows and maintain an ultra-lightweight, future-proof stack with zero complex binary dependencies, this native, Rust-backed Polars formatter was built from the ground up.
+
