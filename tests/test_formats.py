@@ -25,10 +25,16 @@ def test_format_compact_systems():
     result = df.select(
         [
             fmt_number(
-                'value', decimals=1, compact=True, compact_system='financial'
+                columns='value',
+                decimals=1,
+                compact=True,
+                compact_system='financial',
             ).alias('financial'),
             fmt_number(
-                'value', decimals=1, compact=True, compact_system='engineering'
+                columns='value',
+                decimals=1,
+                compact=True,
+                compact_system='engineering',
             ).alias('engineering'),
         ]
     )
@@ -48,7 +54,7 @@ def test_fmt_percent():
 
     # Act
     result = df.select(
-        [fmt_percent('rates', decimals=2, use_seps=False).alias('pct')]
+        [fmt_percent(columns='rates', decimals=2, use_seps=False).alias('pct')]
     )
 
     # Assert
@@ -65,14 +71,14 @@ def test_fmt_currency():
     result = df.select(
         [
             fmt_currency(
-                'amount',
+                columns='amount',
                 symbol='$',
                 decimals=2,
                 use_seps=True,
                 accounting=True,
             ).alias('usd'),
             fmt_currency(
-                'amount',
+                columns='amount',
                 symbol='€',
                 decimals=0,
                 use_seps=True,
@@ -100,17 +106,17 @@ def test_fmt_scientific():
     # Act
     result = df.select(
         [
-            fmt_scientific('value', decimals=2, exp_style='x10n').alias(
-                'default_style'
-            ),
-            fmt_scientific('value', decimals=1, exp_style='E').alias(
+            fmt_scientific(
+                columns='value', decimals=2, exp_style='x10n'
+            ).alias('default_style'),
+            fmt_scientific(columns='value', decimals=1, exp_style='E').alias(
                 'e_capital_style'
             ),
             fmt_scientific(
-                'value', decimals=2, scale_by=10.0, exp_style='e'
+                columns='value', decimals=2, scale_by=10.0, exp_style='e'
             ).alias('scaled_style'),
             fmt_scientific(
-                'value',
+                columns='value',
                 decimals=1,
                 exp_style='e',
                 force_sign_m=True,
@@ -177,16 +183,16 @@ def test_fmt_bytes():
     result = df.select(
         [
             # Test default decimal standard with space
-            fmt_bytes('value', decimals=1, standard='decimal').alias(
+            fmt_bytes(columns='value', decimals=1, standard='decimal').alias(
                 'decimal_std'
             ),
             # Test binary standard with space
-            fmt_bytes('value', decimals=1, standard='binary').alias(
+            fmt_bytes(columns='value', decimals=1, standard='binary').alias(
                 'binary_std'
             ),
             # Test binary standard without intervening space and forced sign
             fmt_bytes(
-                'value',
+                columns='value',
                 decimals=2,
                 standard='binary',
                 incl_space=False,
@@ -244,17 +250,21 @@ def test_fmt_integer_and_substitution_helpers():
     # Act
     result = df.select(
         [
-            fmt_integer('integers', use_seps=True).alias('int_standard'),
+            fmt_integer(columns='integers', use_seps=True).alias(
+                'int_standard'
+            ),
             fmt_integer(
-                'integers', compact=True, compact_system='financial'
+                columns='integers', compact=True, compact_system='financial'
             ).alias('int_compact'),
-            fmt_tf('booleans', true_val='Yes', false_val='No').alias(
+            fmt_tf(columns='booleans', true_val='Yes', false_val='No').alias(
                 'tf_custom'
             ),
-            sub_missing('missing_mix', missing_text='N/A').alias(
+            sub_missing(columns='missing_mix', missing_text='N/A').alias(
                 'missing_replaced'
             ),
-            sub_zero('zeros_mix', zero_text='-').alias('zeros_replaced'),
+            sub_zero(columns='zeros_mix', zero_text='-').alias(
+                'zeros_replaced'
+            ),
         ]
     )
 
@@ -287,19 +297,21 @@ def test_fmt_tf_advanced():
     result = df.select(
         [
             # Test preset styles with explicit na_val substitution
-            fmt_tf('status', tf_style='arrows', na_val='—').alias(
+            fmt_tf(columns='status', tf_style='arrows', na_val='—').alias(
                 'arrows_with_na'
             ),
             # Test custom true/false override values alongside a text pattern wrapper
             fmt_tf(
-                'status',
+                columns='status',
                 true_val='Active',
                 false_val='Inactive',
                 pattern='[{x}]',
                 na_val='Missing',
             ).alias('custom_override'),
             # Test standard default behavior without na_val handling (retains null)
-            fmt_tf('status', tf_style='yes-no').alias('default_retains_null'),
+            fmt_tf(columns='status', tf_style='yes-no').alias(
+                'default_retains_null'
+            ),
         ]
     )
 
@@ -326,7 +338,7 @@ def test_multicolumn_decoration():
 
     # Act
     # Pass a list of columns to fmt_number instead of a single string
-    expressions = fmt_number(['A', 'B'], decimals=1, use_seps=True)
+    expressions = fmt_number(columns=['A', 'B'], decimals=1, use_seps=True)
 
     assert isinstance(expressions, list)
     result = df.with_columns(expressions)
@@ -334,3 +346,63 @@ def test_multicolumn_decoration():
     # Assert
     assert result['A'].to_list() == ['1,000.6', '2,500,000.0']
     assert result['B'].to_list() == ['0.0', '-500.2']
+
+
+def test_fmt_number_significant_figures():
+    """
+    Verifies that n_sigfig formats numbers to specific significant figures,
+    dynamically managing decimal padding, zero-fills, and handling Nulls natively.
+    """
+    # Arrange
+    df = DataFrame(
+        {
+            'numbers': [12.345, 1.2345, 123.45, 0.0012345, 1200.0, None],
+        }
+    )
+
+    # Act
+    result = df.select(
+        [
+            # Test standard 3 significant figures formatting
+            fmt_number(columns='numbers', n_sigfig=3, use_seps=True).alias(
+                'sigfig_3'
+            ),
+            # Test strict 1 significant figure rounding
+            fmt_number(columns='numbers', n_sigfig=1, use_seps=True).alias(
+                'sigfig_1'
+            ),
+            # Test significant figures combined with a layout pattern wrapper
+            fmt_number(
+                columns='numbers', n_sigfig=4, pattern='val: {x}'
+            ).alias('sigfig_4_pattern'),
+        ]
+    )
+
+    # Assert
+    # 12.345 -> 12.3 (1 dec)
+    # 1.2345 -> 1.23 (2 dec)
+    # 123.45 -> 123  (0 dec)
+    # 0.0012345 -> 0.00123 (5 dec)
+    # 1200.0 -> 1,200 (0 dec, checks that thousands separators work)
+    expected_sigfig_3 = ['12.3', '1.23', '123', '0.00123', '1,200', None]
+
+    # 12.345 -> 10 (rounds down, keeps 0 dec)
+    # 1.2345 -> 1
+    # 123.45 -> 100
+    # 0.0012345 -> 0.001
+    # 1200.0 -> 1,000
+    expected_sigfig_1 = ['10', '1', '100', '0.001', '1,000', None]
+
+    # Testing precision padding for trailing zeros (e.g., 1200.0 with 4 sigfigs -> 1200)
+    expected_sigfig_4_pattern = [
+        'val: 12.35',
+        'val: 1.235',
+        'val: 123.5',
+        'val: 0.001235',
+        'val: 1,200',  # Added the comma here to match default use_seps=True
+        None,
+    ]
+
+    assert result['sigfig_3'].to_list() == expected_sigfig_3
+    assert result['sigfig_1'].to_list() == expected_sigfig_1
+    assert result['sigfig_4_pattern'].to_list() == expected_sigfig_4_pattern

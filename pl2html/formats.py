@@ -17,12 +17,10 @@ from polars import (
 # --- 0. Decorator to cleanly support single or multiple columns ---
 def _multicolumn(func):
     @_wraps(func)
-    def wrapper(columns: str | _Iterable[str], *args, **kwargs):
+    def wrapper(*, columns: str | _Iterable[str], **kwargs):
         if isinstance(columns, str):
-            return func(columns, *args, **kwargs)
-        # Automatically alias each expression to its original column name
-        # so Polars knows exactly which column to overwrite/create.
-        return [func(col, *args, **kwargs).alias(col) for col in columns]
+            return func(columns=columns, **kwargs)
+        return [func(columns=col, **kwargs).alias(col) for col in columns]
 
     return wrapper
 
@@ -34,6 +32,7 @@ _Columns = str | list[str]
 
 @_multicolumn
 def fmt_number(
+    *,
     columns: _Columns,
     decimals: int = 2,
     scale_by: float = 1.0,
@@ -42,6 +41,7 @@ def fmt_number(
     use_seps: bool = True,
     accounting: bool = False,
     pattern: str = '{x}',
+    n_sigfig: int | None = None,
 ) -> _Expr:
     """
     Highly optimized, native Polars numeric formatter matching great_tables features.
@@ -90,38 +90,71 @@ def fmt_number(
         val_scaled = val
         suffix_chain = _lit('')
 
-    # 2. Handle precision rounding and extract base components natively
-    epsilon = _when(val_scaled >= 0).then(_lit(1e-9)).otherwise(_lit(-1e-9))
-    rounded = (val_scaled + epsilon).round(decimals)
+    # 2. Dynamic Precision Handling (Significant Figures vs Fixed Decimals)
+    if n_sigfig is not None:
+        if n_sigfig < 1:
+            raise ValueError('n_sigfig must be a positive integer >= 1')
 
-    if decimals > 0:
-        int_part = rounded.cast(_Int64).abs().cast(_String)
-        full_str = rounded.abs().cast(_String)
-        frac_part = (
-            _when(full_str.str.contains(r'\.'))
-            .then(full_str.str.split('.').list.get(1).str.slice(0, decimals))
-            .otherwise(_lit(''))
-        ).str.pad_end(decimals, fill_char='0')
+        # Round natively using Polars' built-in significant figures feature
+        rounded = val_scaled.round_sig_figs(n_sigfig)
+        abs_rounded = rounded.abs()
 
-        if use_seps:
-            int_part = (
-                int_part.str.reverse()
-                .str.replace_all(r'(\d{3})', r'${1},')
-                .str.strip_suffix(',')
-                .str.reverse()
-            )
-
-        base_num_str = int_part + _lit('.') + frac_part
+        # Determine the number of dynamic decimal places needed for padding per row
+        log10_expr = (
+            _when(abs_rounded > 0)
+            .then(abs_rounded.log10())
+            .otherwise(_lit(0.0))
+        )
+        # decimals required = n_sigfig - 1 - floor(log10(x))
+        dynamic_decimals = (_lit(n_sigfig - 1) - log10_expr.floor()).cast(
+            _Int32
+        )
+        # Ensure we don't try to pad negative decimal places for large numbers
+        dynamic_decimals = (
+            _when(dynamic_decimals < 0)
+            .then(_lit(0))
+            .otherwise(dynamic_decimals)
+        )
     else:
-        base_num_str = rounded.round(0).cast(_Int64).abs().cast(_String)
-        if use_seps:
-            base_num_str = (
-                base_num_str.str.reverse()
-                .str.replace_all(r'(\d{3})', r'${1},')
-                .str.strip_suffix(',')
-                .str.reverse()
-            )
+        # Fallback to standard fixed decimal logic
+        epsilon = (
+            _when(val_scaled >= 0).then(_lit(1e-9)).otherwise(_lit(-1e-9))
+        )
+        rounded = (val_scaled + epsilon).round(decimals)
+        dynamic_decimals = _lit(decimals)
 
+    # 3. Component Extraction & Alignment
+    int_part = rounded.cast(_Int64).abs().cast(_String)
+    full_str = rounded.abs().cast(_String)
+
+    raw_frac = (
+        _when(full_str.str.contains(r'\.'))
+        .then(full_str.str.split('.').list.get(1))
+        .otherwise(_lit(''))
+    )
+
+    # Use native Python string multiplication inside _lit()
+    pad_len = n_sigfig if n_sigfig is not None else decimals
+    frac_part = (
+        _when(dynamic_decimals > 0)
+        .then((raw_frac + _lit('0' * pad_len)).str.slice(0, dynamic_decimals))
+        .otherwise(_lit(''))
+    )
+
+    # 4. Constructing Base Number String
+    if use_seps:
+        int_part = (
+            int_part.str.reverse()
+            .str.replace_all(r'(\d{3})', r'${1},')
+            .str.strip_suffix(',')
+            .str.reverse()
+        )
+
+    base_num_str = (
+        _when(dynamic_decimals > 0)
+        .then(int_part + _lit('.') + frac_part)
+        .otherwise(int_part)
+    )
     base_num_str = base_num_str + suffix_chain
 
     prefix, suffix = '', ''
@@ -154,7 +187,7 @@ def fmt_number(
 
 @_multicolumn
 def fmt_percent(
-    columns: _Columns, decimals: int = 2, use_seps: bool = True
+    *, columns: _Columns, decimals: int = 2, use_seps: bool = True
 ) -> _Expr:
     """Formats columns as percentages, multiplying by 100 automatically."""
     return fmt_number(
@@ -168,6 +201,7 @@ def fmt_percent(
 
 @_multicolumn
 def fmt_currency(
+    *,
     columns: _Columns,
     symbol: str = '$',
     decimals: int = 2,
@@ -186,6 +220,7 @@ def fmt_currency(
 
 @_multicolumn
 def fmt_scientific(
+    *,
     columns: _Columns,
     decimals: int = 2,
     scale_by: float = 1.0,
@@ -259,6 +294,7 @@ def fmt_scientific(
 
 @_multicolumn
 def fmt_bytes(
+    *,
     columns: _Columns,
     standard: _Literal['decimal', 'binary'] = 'decimal',
     decimals: int = 1,
@@ -375,6 +411,7 @@ def fmt_bytes(
 
 @_multicolumn
 def fmt_tf(
+    *,
     columns: _Columns,
     tf_style: _Literal[
         'true-false',
@@ -439,12 +476,12 @@ def fmt_tf(
 
 
 @_multicolumn
-def sub_missing(columns: _Columns, missing_text: str = '—') -> _Expr:
+def sub_missing(*, columns: _Columns, missing_text: str = '—') -> _Expr:
     return _col(columns).fill_null(_lit(missing_text))
 
 
 @_multicolumn
-def sub_zero(columns: _Columns, zero_text: str = '—') -> _Expr:
+def sub_zero(*, columns: _Columns, zero_text: str = '—') -> _Expr:
     return (
         _when(_col(columns) == 0)
         .then(_lit(zero_text))
@@ -454,6 +491,7 @@ def sub_zero(columns: _Columns, zero_text: str = '—') -> _Expr:
 
 @_multicolumn
 def fmt_integer(
+    *,
     columns: _Columns,
     scale_by: float = 1.0,
     compact: bool = False,
