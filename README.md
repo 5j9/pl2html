@@ -204,5 +204,4 @@ Most of the API design and formatting parameters in this library are heavily ins
 However, this library was born out of distinct architectural and environment constraints:
 
 * **Zero Overhead Styling:** While `great-tables` is incredibly feature-rich, it often produces dense HTML styles and boilerplate structures that were unnecessary for the target use cases. This library optimizes for minimal, highly clean HTML output.
-* **Modern Python Compatibility (Py 3.14+):** `great-tables` pulls in heavy external dependencies, including binary wheels like `multimark`. At the time of development, these dependencies did not support Python 3.14. To unblock workflows and maintain an ultra-lightweight, future-proof stack with zero complex binary dependencies, this native, Rust-backed Polars formatter was built from the ground up.
-
+* **Modern Python Compatibility (Py 3.14+):** `great-tables` pulls in heavy external dependencies, including binary wheels like `multimark`. At the time of development, these dependencies did not support Python 3.14 (see [multimark #3](https://github.com/posit-dev/multimark/issues/3)). To unblock workflows and maintain an ultra-lightweight, future-proof stack with zero complex binary dependencies, this native, Rust-backed Polars formatter was built from the ground up.
