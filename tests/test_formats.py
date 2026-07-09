@@ -461,3 +461,27 @@ def test_formatting_small_floats_compact():
         '0.001061',
         '0.0001380',
     ]
+
+
+def test_fmt_number_panics_on_nan_or_inf():
+    # Live market data spreads frequently hit NaN or Infinity on empty order books
+    df = DataFrame(
+        {
+            'sprd': [0.1234, float('nan'), float('inf'), -0.5678],
+        },
+        schema={'sprd': Float64},
+    )
+
+    # Act
+    # On unpatched code, this will instantly crash with "get index is out of bounds"
+    # because "NaN" and "inf" split into single-element lists.
+    result = df.select(fmt_number(columns='sprd', decimals=3))
+
+    # Assert
+    # The patched version should handle them gracefully (or pass them through as strings)
+    assert result.get_column('sprd').to_list() == [
+        '0.123',
+        'NaN',
+        'inf',
+        '-0.568',
+    ]

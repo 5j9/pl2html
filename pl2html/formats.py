@@ -30,6 +30,120 @@ def _multicolumn(func):
 _Columns = str | list[str]
 
 
+def _apply_compact_scaling(
+    val: _Expr, compact: bool, compact_system: str
+) -> tuple[_Expr, _Expr]:
+    """Handles logic block 1: Extracts compact suffix rules and scales values down."""
+    if not compact:
+        return val, _lit('')
+
+    abs_val = val.abs()
+    log10_expr = _when(abs_val > 0).then(abs_val.log10()).otherwise(_lit(0.0))
+    thousands_exponent = (log10_expr / 3.0).floor().cast(_Int32) * 3
+
+    # Force exponent to 0 for fractional numbers (< 1.0)
+    thousands_exponent = (
+        _when(thousands_exponent < 0)
+        .then(_lit(0))
+        .otherwise(thousands_exponent)
+    )
+
+    system_chars = (
+        ('k', 'M', 'G', 'T')
+        if compact_system == 'engineering'
+        else ('K', 'M', 'B', 'T')
+    )
+
+    suffix_chain = (
+        _when(thousands_exponent == 3)
+        .then(_lit(system_chars[0]))
+        .when(thousands_exponent == 6)
+        .then(_lit(system_chars[1]))
+        .when(thousands_exponent == 9)
+        .then(_lit(system_chars[2]))
+        .when(thousands_exponent == 12)
+        .then(_lit(system_chars[3]))
+        .otherwise(_lit(''))
+    )
+
+    divisor = _lit(10.0).pow(thousands_exponent.cast(_Float64))
+    return val / divisor, suffix_chain
+
+
+def _compute_dynamic_precision(
+    val_scaled: _Expr, decimals: int, n_sigfig: int | None
+) -> tuple[_Expr, _Expr | int]:
+    """Handles logic block 2: Computes precision bounds safely avoiding non-finite floats, preserving nulls."""
+
+    # FIX: Explicitly target only NaN and Infinity, leaving nulls untouched
+    is_anomaly = val_scaled.is_nan() | val_scaled.is_infinite()
+    safe_val = _when(is_anomaly).then(_lit(0.0)).otherwise(val_scaled)
+
+    if n_sigfig is not None:
+        if n_sigfig < 1:
+            raise ValueError('n_sigfig must be a positive integer >= 1')
+
+        rounded = safe_val.round_sig_figs(n_sigfig)
+        abs_rounded = rounded.abs()
+
+        log10_expr = (
+            _when(abs_rounded > 0)
+            .then(abs_rounded.log10())
+            .otherwise(_lit(0.0))
+        )
+        dynamic_decimals = (_lit(n_sigfig - 1) - log10_expr.floor()).cast(
+            _Int32
+        )
+        dynamic_decimals = (
+            _when(dynamic_decimals < 0)
+            .then(_lit(0))
+            .otherwise(dynamic_decimals)
+        )
+    else:
+        epsilon = _when(safe_val >= 0).then(_lit(1e-9)).otherwise(_lit(-1e-9))
+        rounded = (safe_val + epsilon).round(decimals)
+        dynamic_decimals = _lit(decimals)
+
+    return rounded, dynamic_decimals
+
+
+def _extract_and_align_components(
+    rounded: _Expr,
+    decimals: int,
+    n_sigfig: int | None,
+    dynamic_decimals: _Expr | int,
+    use_seps: bool,
+) -> _Expr:
+    """Handles logic blocks 3 & 4: Cuts string tokens cleanly."""
+    # Since rounded is calculated from safe_val above, it contains no NaN/inf here.
+    # The .cast(_Int64) is now completely safe from panicking!
+    int_part = rounded.cast(_Int64).abs().cast(_String)
+    full_str = rounded.abs().cast(_String)
+
+    raw_frac = full_str.str.extract(r'\.(.*)', 1).fill_null(_lit(''))
+
+    pad_len = n_sigfig if n_sigfig is not None else decimals
+    frac_part = (
+        _when(dynamic_decimals > 0)
+        .then((raw_frac + _lit('0' * pad_len)).str.slice(0, dynamic_decimals))
+        .otherwise(_lit(''))
+    )
+
+    if use_seps:
+        int_part = (
+            int_part.str.reverse()
+            .str.replace_all(r'(\d{3})', r'${1},')
+            .str.strip_suffix(',')
+            .str.reverse()
+        )
+
+    return (
+        _when(dynamic_decimals > 0)
+        .then(int_part + _lit('.') + frac_part)
+        .otherwise(int_part)
+    )
+
+
 @_multicolumn
 def fmt_number(
     *,
@@ -53,119 +167,26 @@ def fmt_number(
     if scale_by != 1.0:
         val = val * scale_by
 
-    abs_val = val.abs()
-
-    # 1. Extract compact scaling suffix chain if enabled
-    if compact:
-        log10_expr = (
-            _when(abs_val > 0).then(abs_val.log10()).otherwise(_lit(0.0))
-        )
-        thousands_exponent = (log10_expr / 3.0).floor().cast(_Int32) * 3
-
-        # Force exponent to 0 for fractional numbers (< 1.0) so we don't scale up without micro-suffixes
-        thousands_exponent = (
-            _when(thousands_exponent < 0)
-            .then(_lit(0))
-            .otherwise(thousands_exponent)
-        )
-
-        if compact_system == 'engineering':
-            suffix_chain = (
-                _when(thousands_exponent == 3)
-                .then(_lit('k'))
-                .when(thousands_exponent == 6)
-                .then(_lit('M'))
-                .when(thousands_exponent == 9)
-                .then(_lit('G'))
-                .when(thousands_exponent == 12)
-                .then(_lit('T'))
-                .otherwise(_lit(''))
-            )
-        else:
-            suffix_chain = (
-                _when(thousands_exponent == 3)
-                .then(_lit('K'))
-                .when(thousands_exponent == 6)
-                .then(_lit('M'))
-                .when(thousands_exponent == 9)
-                .then(_lit('B'))
-                .when(thousands_exponent == 12)
-                .then(_lit('T'))
-                .otherwise(_lit(''))
-            )
-        divisor = _lit(10.0).pow(thousands_exponent.cast(_Float64))
-        val_scaled = val / divisor
-    else:
-        val_scaled = val
-        suffix_chain = _lit('')
-
-    # 2. Dynamic Precision Handling (Significant Figures vs Fixed Decimals)
-    if n_sigfig is not None:
-        if n_sigfig < 1:
-            raise ValueError('n_sigfig must be a positive integer >= 1')
-
-        rounded = val_scaled.round_sig_figs(n_sigfig)
-        abs_rounded = rounded.abs()
-
-        log10_expr = (
-            _when(abs_rounded > 0)
-            .then(abs_rounded.log10())
-            .otherwise(_lit(0.0))
-        )
-        dynamic_decimals = (_lit(n_sigfig - 1) - log10_expr.floor()).cast(
-            _Int32
-        )
-        dynamic_decimals = (
-            _when(dynamic_decimals < 0)
-            .then(_lit(0))
-            .otherwise(dynamic_decimals)
-        )
-    else:
-        epsilon = (
-            _when(val_scaled >= 0).then(_lit(1e-9)).otherwise(_lit(-1e-9))
-        )
-        rounded = (val_scaled + epsilon).round(decimals)
-        dynamic_decimals = _lit(decimals)
-
-    # 3. Component Extraction & Alignment
-    int_part = rounded.cast(_Int64).abs().cast(_String)
-    full_str = rounded.abs().cast(_String)
-
-    raw_frac = (
-        _when(full_str.str.contains(r'\.'))
-        .then(full_str.str.split('.').list.get(1))
-        .otherwise(_lit(''))
+    # --- HELPER ORCHESTRATION ---
+    val_scaled, suffix_chain = _apply_compact_scaling(
+        val, compact, compact_system
     )
-
-    pad_len = n_sigfig if n_sigfig is not None else decimals
-    frac_part = (
-        _when(dynamic_decimals > 0)
-        .then((raw_frac + _lit('0' * pad_len)).str.slice(0, dynamic_decimals))
-        .otherwise(_lit(''))
+    rounded, dynamic_decimals = _compute_dynamic_precision(
+        val_scaled, decimals, n_sigfig
     )
-
-    # 4. Constructing Base Number String
-    if use_seps:
-        int_part = (
-            int_part.str.reverse()
-            .str.replace_all(r'(\d{3})', r'${1},')
-            .str.strip_suffix(',')
-            .str.reverse()
-        )
-
-    base_num_str = (
-        _when(dynamic_decimals > 0)
-        .then(int_part + _lit('.') + frac_part)
-        .otherwise(int_part)
+    base_num_str = _extract_and_align_components(
+        rounded, decimals, n_sigfig, dynamic_decimals, use_seps
     )
     base_num_str = base_num_str + suffix_chain
 
+    # --- PATTERN PARSING ---
     prefix, suffix = '', ''
     if pattern != '{x}':
         parts = pattern.split('{x}')
         if len(parts) == 2:
             prefix, suffix = parts[0], parts[1]
 
+    # --- STANDARD EXPRESSION GENERATION ---
     if accounting:
         formatted_expr = (
             _when(val < 0)
@@ -192,7 +213,17 @@ def fmt_number(
             .otherwise(_lit('+') + _lit(prefix) + base_num_str + _lit(suffix))
         )
 
-    return formatted_expr.alias(col_name)
+    # --- CRUCIAL FIX: NON-FINITE GLOBAL GUARD MASK ---
+    # Intercepts expression evaluation to bypass Int64 panics on NaN and Infinity tokens
+    final_guarded_expr = (
+        _when(val.is_nan())
+        .then(_lit('NaN'))
+        .when(val.is_infinite())
+        .then(_when(val < 0).then(_lit('-inf')).otherwise(_lit('inf')))
+        .otherwise(formatted_expr)
+    )
+
+    return final_guarded_expr.alias(col_name)
 
 
 @_multicolumn
