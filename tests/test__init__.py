@@ -1,14 +1,15 @@
 from datetime import date, datetime
 
-import polars as pl
+from polars import DataFrame, Float64, String, col, lit, when
 
 from pl2html import to_html
+from pl2html.formats import fmt_number
 from tests import normalize_html
 
 
 def test_basic_table_compilation(expected_html):
     # This automatically loads: html_fixtures/test_basic_table_compilation.html
-    df = pl.DataFrame({'id': [1, 2], 'name': ['Alice', 'Bob']})
+    df = DataFrame({'id': [1, 2], 'name': ['Alice', 'Bob']})
 
     actual_html = to_html(df)
     assert normalize_html(actual_html) == expected_html
@@ -16,7 +17,7 @@ def test_basic_table_compilation(expected_html):
 
 def test_integer_thousands_separator(expected_html):
     # This automatically loads: html_fixtures/test_integer_thousands_separator.html
-    df = pl.DataFrame({'large_numbers': [1000, 1000000]})
+    df = DataFrame({'large_numbers': [1000, 1000000]})
 
     actual_html = to_html(df)
     assert normalize_html(actual_html) == expected_html
@@ -28,7 +29,7 @@ def test_float_rounding_and_formatting(expected_html):
     and nulls within float columns are safely converted to empty cells.
     """
     # Arrange: Setup a mix of varied decimal lengths, whole floats, and null values
-    df = pl.DataFrame(
+    df = DataFrame(
         {
             'metric_a': [1.123456, 2.5, None],
             'metric_b': [0.0001, -12.34567, 100.0],
@@ -48,7 +49,7 @@ def test_large_float_thousands_separator(expected_html):
     3 decimal places.
     """
     # Arrange: Setup giant floats, negative giant floats, and clean whole numbers
-    df = pl.DataFrame(
+    df = DataFrame(
         {
             'big_metrics': [
                 1234567.89123,  # Should become 1,234,567.891
@@ -69,7 +70,7 @@ def test_format_overrides_custom_expressions(expected_html):
     are handled independently using the format_overrides and attrs parameters.
     """
     # Arrange: Setup a basic dataset with a score and a trend column
-    df = pl.DataFrame(
+    df = DataFrame(
         {
             'symbol': ['AAPL', 'TSLA'],
             'score': [85, 42],
@@ -80,11 +81,11 @@ def test_format_overrides_custom_expressions(expected_html):
     # 2. attrs ONLY handles HTML tag customizations (clean, zero-tag boilerplate)
     custom_attrs = {
         'score': {
-            'class': pl.lit('score-cell'),
+            'class': lit('score-cell'),
             'style': (
-                pl.when(pl.col('score') >= 50)
-                .then(pl.lit('background-color: #00FF00;'))
-                .otherwise(pl.lit('background-color: #FF0000;'))
+                when(col('score') >= 50)
+                .then(lit('background-color: #00FF00;'))
+                .otherwise(lit('background-color: #FF0000;'))
             ),
         }
     }
@@ -105,7 +106,7 @@ def test_temporal_columns_handling(expected_html):
     string conversion fallback.
     """
     # Arrange: Create a DataFrame with native Date, Datetime, and pre-formatted strings
-    df = pl.DataFrame(
+    df = DataFrame(
         {
             'event_date': [date(2026, 1, 1), date(2026, 12, 31)],
             'timestamp': [
@@ -124,3 +125,35 @@ def test_temporal_columns_handling(expected_html):
     actual_html = to_html(df)
 
     assert normalize_html(actual_html) == expected_html
+
+
+def test_to_html_evaluates_styles_before_formatters(expected_html):
+    # 1. Setup a numeric dataset where computing a rank ratio
+    # requires dividing float values.
+    df = DataFrame(
+        {'sprd': [10.0, 50.0, 100.0], 'label': ['A', 'B', 'C']},
+        schema={'sprd': Float64, 'label': String},
+    )
+
+    # 2. Simulate what rank_color does under the hood:
+    # It builds an expression that performs math/division on the column.
+    # If the column becomes a String too early, this division will throw an InvalidOperationError.
+    mock_rank_style_expr = lit('font-size: ') + (
+        col('sprd') / col('sprd').max()
+    ).cast(
+        String
+    )  # Convert resulting scalar or weight to a dummy style string
+
+    attrs = {'sprd': {'style': mock_rank_style_expr}}
+
+    # 3. Generate the formatting expression that converts the float to a string
+    formatting_exprs = fmt_number(columns=['sprd'], decimals=2)
+    formatting_exprs = fmt_number(columns=['sprd'], decimals=2)
+
+    # Act
+    # This should process the math inside `attrs` first using the numeric data,
+    # then apply the formatting expressions, and finally output valid HTML.
+    assert (
+        normalize_html(to_html(df, attrs=attrs, formatters=formatting_exprs))
+        == expected_html
+    )
