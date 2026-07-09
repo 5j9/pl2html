@@ -10,7 +10,7 @@ from polars import (
     when as _when,
 )
 
-__version__ = '0.2.1.dev1'
+__version__ = '0.3.0'
 
 
 def _escape_polars_string(col_name: str) -> _Expr:
