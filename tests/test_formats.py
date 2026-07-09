@@ -406,3 +406,38 @@ def test_fmt_number_significant_figures():
     assert result['sigfig_3'].to_list() == expected_sigfig_3
     assert result['sigfig_1'].to_list() == expected_sigfig_1
     assert result['sigfig_4_pattern'].to_list() == expected_sigfig_4_pattern
+
+
+def test_fmt_number_force_sign():
+    """
+    Verifies that force_sign=True explicitly prepends a '+' to positive numbers,
+    retains '-' for negative numbers, and leaves zero completely unsigned.
+    """
+    # Arrange
+    df = DataFrame(
+        {
+            'mixed_signs': [123.45, -67.89, 0.0, None],
+        }
+    )
+
+    # Act
+    result = df.select(
+        [
+            # Test with force_sign enabled
+            fmt_number(
+                columns='mixed_signs', decimals=1, force_sign=True
+            ).alias('signed'),
+            # Test default behavior (force_sign=False)
+            fmt_number(
+                columns='mixed_signs', decimals=1, force_sign=False
+            ).alias('default'),
+        ]
+    )
+
+    # Assert
+    # Positive gets '+', negative keeps '-', zero gets no sign
+    expected_signed = ['+123.5', '-67.9', '0.0', None]
+    expected_default = ['123.5', '-67.9', '0.0', None]
+
+    assert result['signed'].to_list() == expected_signed
+    assert result['default'].to_list() == expected_default

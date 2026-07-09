@@ -42,6 +42,7 @@ def fmt_number(
     accounting: bool = False,
     pattern: str = '{x}',
     n_sigfig: int | None = None,
+    force_sign: bool = False,
 ) -> _Expr:
     """
     Highly optimized, native Polars numeric formatter matching great_tables features.
@@ -173,13 +174,22 @@ def fmt_number(
                 + _lit(suffix)
                 + _lit(')')
             )
-            .otherwise(_lit(prefix) + base_num_str + _lit(suffix))
+            .otherwise(
+                # If force_sign is True, explicitly prepend '+' to positive values
+                _lit('+' if force_sign else '')
+                + _lit(prefix)
+                + base_num_str
+                + _lit(suffix)
+            )
         )
     else:
         formatted_expr = (
             _when(val < 0)
             .then(_lit('-') + _lit(prefix) + base_num_str + _lit(suffix))
-            .otherwise(_lit(prefix) + base_num_str + _lit(suffix))
+            # Handle zero explicitly if you don't want a sign on exactly 0.0
+            .when((val == 0) | (not force_sign))
+            .then(_lit(prefix) + base_num_str + _lit(suffix))
+            .otherwise(_lit('+') + _lit(prefix) + base_num_str + _lit(suffix))
         )
 
     return formatted_expr
@@ -187,7 +197,11 @@ def fmt_number(
 
 @_multicolumn
 def fmt_percent(
-    *, columns: _Columns, decimals: int = 2, use_seps: bool = True
+    *,
+    columns: _Columns,
+    decimals: int = 2,
+    use_seps: bool = True,
+    force_sign: bool = False,
 ) -> _Expr:
     """Formats columns as percentages, multiplying by 100 automatically."""
     return fmt_number(
@@ -196,6 +210,7 @@ def fmt_percent(
         scale_by=100.0,
         use_seps=use_seps,
         pattern='{x}%',
+        force_sign=force_sign,
     )
 
 
@@ -207,6 +222,7 @@ def fmt_currency(
     decimals: int = 2,
     use_seps: bool = True,
     accounting: bool = True,
+    force_sign: bool = False,
 ) -> _Expr:
     """Formats columns as localized currency values."""
     return fmt_number(
@@ -215,6 +231,7 @@ def fmt_currency(
         use_seps=use_seps,
         accounting=accounting,
         pattern=f'{symbol}{{x}}',
+        force_sign=force_sign,
     )
 
 
@@ -499,6 +516,7 @@ def fmt_integer(
     use_seps: bool = True,
     accounting: bool = False,
     pattern: str = '{x}',
+    force_sign: bool = False,
 ) -> _Expr:
     """Highly optimized native Polars integer formatter wrapper."""
     return fmt_number(
@@ -510,4 +528,5 @@ def fmt_integer(
         use_seps=use_seps,
         accounting=accounting,
         pattern=pattern,
+        force_sign=force_sign,
     )
