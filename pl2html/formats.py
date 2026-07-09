@@ -62,6 +62,13 @@ def fmt_number(
         )
         thousands_exponent = (log10_expr / 3.0).floor().cast(_Int32) * 3
 
+        # Force exponent to 0 for fractional numbers (< 1.0) so we don't scale up without micro-suffixes
+        thousands_exponent = (
+            _when(thousands_exponent < 0)
+            .then(_lit(0))
+            .otherwise(thousands_exponent)
+        )
+
         if compact_system == 'engineering':
             suffix_chain = (
                 _when(thousands_exponent == 3)
@@ -97,28 +104,23 @@ def fmt_number(
         if n_sigfig < 1:
             raise ValueError('n_sigfig must be a positive integer >= 1')
 
-        # Round natively using Polars' built-in significant figures feature
         rounded = val_scaled.round_sig_figs(n_sigfig)
         abs_rounded = rounded.abs()
 
-        # Determine the number of dynamic decimal places needed for padding per row
         log10_expr = (
             _when(abs_rounded > 0)
             .then(abs_rounded.log10())
             .otherwise(_lit(0.0))
         )
-        # decimals required = n_sigfig - 1 - floor(log10(x))
         dynamic_decimals = (_lit(n_sigfig - 1) - log10_expr.floor()).cast(
             _Int32
         )
-        # Ensure we don't try to pad negative decimal places for large numbers
         dynamic_decimals = (
             _when(dynamic_decimals < 0)
             .then(_lit(0))
             .otherwise(dynamic_decimals)
         )
     else:
-        # Fallback to standard fixed decimal logic
         epsilon = (
             _when(val_scaled >= 0).then(_lit(1e-9)).otherwise(_lit(-1e-9))
         )
@@ -135,7 +137,6 @@ def fmt_number(
         .otherwise(_lit(''))
     )
 
-    # Use native Python string multiplication inside _lit()
     pad_len = n_sigfig if n_sigfig is not None else decimals
     frac_part = (
         _when(dynamic_decimals > 0)
@@ -176,7 +177,6 @@ def fmt_number(
                 + _lit(')')
             )
             .otherwise(
-                # If force_sign is True, explicitly prepend '+' to positive values
                 _lit('+' if force_sign else '')
                 + _lit(prefix)
                 + base_num_str
@@ -187,7 +187,6 @@ def fmt_number(
         formatted_expr = (
             _when(val < 0)
             .then(_lit('-') + _lit(prefix) + base_num_str + _lit(suffix))
-            # Handle zero explicitly if you don't want a sign on exactly 0.0
             .when((val == 0) | (not force_sign))
             .then(_lit(prefix) + base_num_str + _lit(suffix))
             .otherwise(_lit('+') + _lit(prefix) + base_num_str + _lit(suffix))

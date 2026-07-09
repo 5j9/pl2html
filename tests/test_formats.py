@@ -1,4 +1,4 @@
-from polars import DataFrame
+from polars import DataFrame, Float64
 
 from pl2html.formats import (
     fmt_bytes,
@@ -441,3 +441,23 @@ def test_fmt_number_force_sign():
 
     assert result['signed'].to_list() == expected_signed
     assert result['default'].to_list() == expected_default
+
+
+def test_formatting_small_floats_compact():
+    v = [
+        0.001281,
+        0.001061,
+        0.0001380,
+    ]
+    df = DataFrame(
+        {'v': v},
+        schema={'v': Float64},
+    )
+
+    # Act
+    result = df.select(fmt_number(columns='v', n_sigfig=4, compact=True))
+    assert result.get_column('v').to_list() == [
+        '0.001281',
+        '0.001061',
+        '0.0001380',
+    ]
