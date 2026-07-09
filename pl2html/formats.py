@@ -48,6 +48,7 @@ def fmt_number(
     Highly optimized, native Polars numeric formatter matching great_tables features.
     Runs entirely in the parallel Rust engine without dropping into Python row loops.
     """
+    col_name = columns if isinstance(columns, str) else str(columns)
     val = _col(columns)
     if scale_by != 1.0:
         val = val * scale_by
@@ -192,7 +193,7 @@ def fmt_number(
             .otherwise(_lit('+') + _lit(prefix) + base_num_str + _lit(suffix))
         )
 
-    return formatted_expr
+    return formatted_expr.alias(col_name)
 
 
 @_multicolumn
