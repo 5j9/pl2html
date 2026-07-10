@@ -258,9 +258,7 @@ def to_html(
     """
     lf = df.lazy() if isinstance(df, _DataFrame) else df
     exclude_columns = exclude_columns or []
-    attrs = attrs or {}
 
-    # Setup the evaluation context data
     df_eager = lf.collect()
     lf = df_eager.lazy()
 
@@ -268,7 +266,7 @@ def to_html(
         c for c in df_eager.schema.names() if c not in exclude_columns
     ]
 
-    lf, attrs = _resolve_attributes(lf, df_eager, attrs, visible_columns)
+    lf, attrs = _resolve_attributes(lf, df_eager, attrs or {}, visible_columns)
     lf = _apply_user_formatters(lf, formatters)
 
     return _compile_html(lf, visible_columns, attrs)
