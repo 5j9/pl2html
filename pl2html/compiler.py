@@ -72,10 +72,7 @@ def _build_cell_expr(
     dtype: _DataType,
     attrs: dict[str, dict[str, _Expr]],
 ) -> _Expr:
-    """
-    Applies secure auto-escaping or data formatting overrides, then dynamically
-    compiles HTML attributes into a valid single opening <td> tag block.
-    """
+    """Resolves attribute expressions before user formatters are applied."""
     if dtype.is_integer():
         fmt_expr = _format_integer(col_name)
     elif dtype.is_float():
@@ -114,6 +111,84 @@ def _build_html_skeleton(visible_columns: list[str]) -> tuple[_Expr, _Expr]:
     html_header = _lit('\n'.join(header_parts) + '\n')
     html_footer = _lit('\n  </tbody>\n</table>')
     return html_header, html_footer
+
+
+def _resolve_attributes(
+    lf: _LazyFrame,
+    df: _DataFrame,
+    attrs: dict[str, dict[str, _Expr]],
+    visible_columns: list[str],
+) -> tuple[_LazyFrame, dict[str, dict[str, _Expr]]]:
+    """Compiles dynamic attribute expressions using the raw, unformatted numeric data."""
+    attr_exprs = []
+    attr_aliases = {}
+
+    for col_name, attr_map in attrs.items():
+        if col_name in visible_columns:
+            for attr_name, expr in attr_map.items():
+                alias_key = f'__attr_{col_name}_{attr_name}'
+                attr_exprs.append(_escape_expr(expr).alias(alias_key))
+                attr_aliases[(col_name, attr_name)] = alias_key
+
+    if not attr_exprs:
+        return lf, attrs
+
+    # Evaluate dynamic style contexts on the unformatted DataFrame
+    resolved_attrs_df = df.select(attr_exprs)
+
+    # Re-inject styles as true native structural data streams
+    lf = lf.with_columns(resolved_attrs_df)
+
+    # Remap the attributes dictionary to look at the new column references
+    new_attrs = {col: attr_map.copy() for col, attr_map in attrs.items()}
+
+    for (col_name, attr_name), alias in attr_aliases.items():
+        new_attrs[col_name][attr_name] = _col(alias)
+
+    return lf, new_attrs
+
+
+def _apply_user_formatters(
+    lf: _LazyFrame, formatters: _Expr | list[_Expr] | None
+) -> _LazyFrame:
+    """Applies layout transformation modifications/conversions to columns."""
+    if formatters is None:
+        return lf
+    if isinstance(formatters, _Expr):
+        formatters = [formatters]
+    return lf.with_columns(formatters)
+
+
+def _compile_html(
+    lf: _LazyFrame,
+    visible_columns: list[str],
+    attrs: dict[str, dict[str, _Expr]],
+) -> str:
+    """Constructs the raw structural HTML string from the resolved LazyFrame pipeline."""
+    # NOTE: Recompute the schema after applying user formatters. Formatters may
+    # cast numeric columns to String, and _build_cell_expr uses the current dtype
+    # to decide whether default numeric formatting (e.g. .round()) should be
+    # applied. Using the original schema would incorrectly attempt numeric
+    # formatting on already-formatted string columns.
+    current_schema = lf.collect_schema()
+
+    cell_expressions = [
+        _build_cell_expr(c, current_schema[c], attrs) for c in visible_columns
+    ]
+
+    row_expr = _lit('    <tr>') + _concat_str(cell_expressions) + _lit('</tr>')
+    html_header, html_footer = _build_html_skeleton(visible_columns)
+
+    return (
+        lf.select(row_expr.alias('html_row'))
+        .select(
+            (
+                html_header + _col('html_row').str.join('\n') + html_footer
+            ).alias('html_table')
+        )
+        .collect()
+        .item()
+    )
 
 
 def to_html(
@@ -175,75 +250,18 @@ def to_html(
         ... )
     """
     lf = df.lazy() if isinstance(df, _DataFrame) else df
-
     exclude_columns = exclude_columns or []
     attrs = attrs or {}
 
-    lf = (df := lf.collect()).lazy()
-    schema = df.schema
-    visible_columns = [c for c in schema.names() if c not in exclude_columns]
+    # Setup the evaluation context data
+    df_eager = lf.collect()
+    lf = df_eager.lazy()
 
-    # === STEP 1: RESOLVE AND ESCAPE ALL ATTRIBUTE EXPRESSIONS ===
-    attr_exprs = []
-    attr_aliases = {}
+    visible_columns = [
+        c for c in df_eager.schema.names() if c not in exclude_columns
+    ]
 
-    for col_name, attr_map in attrs.items():
-        if col_name in visible_columns:
-            for attr_name, expr in attr_map.items():
-                alias_key = f'__attr_{col_name}_{attr_name}'
-                attr_exprs.append(_escape_expr(expr).alias(alias_key))
-                attr_aliases[(col_name, attr_name)] = alias_key
+    lf, attrs = _resolve_attributes(lf, df_eager, attrs, visible_columns)
+    lf = _apply_user_formatters(lf, formatters)
 
-    if attr_exprs:
-        resolved_attrs_df = df.select(attr_exprs)
-
-        # Inject back as true native columns
-        lf = lf.with_columns(
-            [
-                resolved_attrs_df.get_column(alias)
-                for alias in attr_aliases.values()
-            ]
-        )
-
-        new_attrs = {}
-        for col_name, attr_map in attrs.items():
-            new_attrs[col_name] = {}
-            for attr_name in attr_map:
-                if (col_name, attr_name) in attr_aliases:
-                    alias = attr_aliases[(col_name, attr_name)]
-                    new_attrs[col_name][attr_name] = _col(alias)
-                else:
-                    new_attrs[col_name][attr_name] = attr_map[attr_name]
-        attrs = new_attrs
-
-    # === STEP 2: APPLY FORMATTERS ===
-    if formatters is not None:
-        if isinstance(formatters, _Expr):
-            formatters = [formatters]
-        lf = lf.with_columns(formatters)
-
-    # === STEP 3: BUILD HTML CELLS ===
-    # NOTE: Recompute the schema after applying user formatters. Formatters may
-    # cast numeric columns to String, and _build_cell_expr uses the current dtype
-    # to decide whether default numeric formatting (e.g. .round()) should be
-    # applied. Using the original schema would incorrectly attempt numeric
-    # formatting on already-formatted string columns.
-    current_schema = lf.collect_schema()
-
-    cell_expressions = []
-    for c in visible_columns:
-        cell_expressions.append(_build_cell_expr(c, current_schema[c], attrs))
-
-    row_expr = _lit('    <tr>') + _concat_str(cell_expressions) + _lit('</tr>')
-    html_header, html_footer = _build_html_skeleton(visible_columns)
-
-    return (
-        lf.select(row_expr.alias('html_row'))
-        .select(
-            (
-                html_header + _col('html_row').str.join('\n') + html_footer
-            ).alias('html_table')
-        )
-        .collect()
-        .item()
-    )
+    return _compile_html(lf, visible_columns, attrs)
