@@ -193,3 +193,26 @@ def test_dynamic_attributes_preserve_numeric_context(expected_html):
     )
 
     assert normalize_html(actual_html) == expected_html
+
+
+def test_attribute_values_are_securely_escaped():
+    """
+    Ensures that dangerous HTML characters within dynamic attribute fields
+    are properly escaped in the raw string layout to mitigate layout bugs and XSS.
+    """
+    df = DataFrame(
+        {
+            'username': ['Admin'],
+            'bio': ['Likes to write "malicious" code & <script>tags</script>'],
+        }
+    )
+
+    attrs = {'username': {'title': col('bio')}}
+
+    # Call the compiler directly
+    actual_html = to_html(df, attrs=attrs, exclude_columns=['bio'])
+
+    # Assert directly against the raw string layout to verify structural entities
+    expected_substring = '<td title="Likes to write &quot;malicious&quot; code &amp; &lt;script&gt;tags&lt;/script&gt;">Admin</td>'
+
+    assert expected_substring in actual_html

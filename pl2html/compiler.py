@@ -11,21 +11,19 @@ from polars import (
 )
 
 
-def _escape_polars_string(col_name: str) -> _Expr:
+def _escape_expr(expr: _Expr) -> _Expr:
     """
-    Escapes a column's string representations for secure HTML compatibility.
-    Because standard HTML entities use look-arounds or loops, we can fall back to
-    a native character loop or custom mapper if extensive characters are used,
-    but basic safety replaces characters sequentially.
+    Escapes an expression's string representations for secure HTML compatibility.
+    Using literal=True prevents the '&' character in replacements from acting
+    as a regex match expansion macro.
     """
     return (
-        _col(col_name)
-        .cast(_String)
-        .str.replace_all('&', '&amp;')
-        .str.replace_all('<', '&lt;')
-        .str.replace_all('>', '&gt;')
-        .str.replace_all('"', '&quot;')
-        .str.replace_all("'", '&#x27;')
+        expr.cast(_String)
+        .str.replace_all('&', '&amp;', literal=True)
+        .str.replace_all('<', '&lt;', literal=True)
+        .str.replace_all('>', '&gt;', literal=True)
+        .str.replace_all('"', '&quot;', literal=True)
+        .str.replace_all("'", '&#x27;', literal=True)
     )
 
 
@@ -78,21 +76,18 @@ def _build_cell_expr(
     Applies secure auto-escaping or data formatting overrides, then dynamically
     compiles HTML attributes into a valid single opening <td> tag block.
     """
-    # 1. Base Data Evaluation (Formatted and HTML Escaped safely)
     if dtype.is_integer():
         fmt_expr = _format_integer(col_name)
     elif dtype.is_float():
         fmt_expr = _format_float(col_name)
     else:
-        fmt_expr = _escape_polars_string(col_name)
+        fmt_expr = _escape_expr(_col(col_name))
 
     fmt_expr = fmt_expr.fill_null('')
 
-    # 2. Build Attributes Expression Natively (e.g., style="...", class="...")
     attr_expr_list = []
     if col_name in attrs:
         for attr_name, val_expr in attrs[col_name].items():
-            # Cast to String FIRST so we can safely check against '' without type panics
             val_str_expr = val_expr.cast(_String)
 
             compiled_attr = (
@@ -101,7 +96,7 @@ def _build_cell_expr(
                 .otherwise(_lit(''))
             )
             attr_expr_list.append(compiled_attr)
-    # Combine attribute strings together
+
     if attr_expr_list:
         opening_td = _lit('<td') + _concat_str(attr_expr_list) + _lit('>')
     else:
@@ -187,34 +182,40 @@ def to_html(
     schema = lf.collect_schema()
     visible_columns = [c for c in schema.names() if c not in exclude_columns]
 
-    # === STEP 1: RESOLVE ALL MATH/STYLE EXPRESSIONS ON DATA FIRST ===
+    # === STEP 1: RESOLVE AND ESCAPE ALL ATTRIBUTE EXPRESSIONS ON NUMERIC DATA FIRST ===
     style_selects = []
-    # Maps (col_name, attr_name) -> unique temporary alias string
     expr_tracker = {}
 
     for col_name, attr_map in attrs.items():
         if col_name in visible_columns:
             for attr_name, expr in attr_map.items():
                 alias_key = f'__attr_{col_name}_{attr_name}'
-                style_selects.append(expr.alias(alias_key))
+                # Safely escape the dynamic expressions on the live graph
+                escaped_expr = _escape_expr(expr)
+                style_selects.append(escaped_expr.alias(alias_key))
                 expr_tracker[(col_name, attr_name)] = alias_key
 
     if style_selects:
-        # Evaluate all structural calculations against the clean numeric context
+        # Evaluate all expressions against the clean numeric context
         df = lf.collect()
-        lf = df.lazy()
         resolved_attrs_df = df.select(style_selects)
 
-        # Rebuild the attrs dict completely with harmless literal vectors
+        # Inject the precomputed, escaped series back into the LazyFrame plan as columns
+        lf = df.lazy().with_columns(
+            [
+                resolved_attrs_df.get_column(alias)
+                for alias in expr_tracker.values()
+            ]
+        )
+
+        # Rebuild the attrs dict to reference our newly injected native columns
         new_attrs = {}
         for col_name, attr_map in attrs.items():
             new_attrs[col_name] = {}
             for attr_name in attr_map:
                 if (col_name, attr_name) in expr_tracker:
                     alias = expr_tracker[(col_name, attr_name)]
-                    new_attrs[col_name][attr_name] = _lit(
-                        resolved_attrs_df.get_column(alias)
-                    )
+                    new_attrs[col_name][attr_name] = _col(alias)
                 else:
                     new_attrs[col_name][attr_name] = attr_map[attr_name]
         attrs = new_attrs
