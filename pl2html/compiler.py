@@ -223,11 +223,16 @@ def to_html(
         lf = lf.with_columns(formatters)
 
     # === STEP 3: BUILD HTML CELLS ===
+    # NOTE: Recompute the schema after applying user formatters. Formatters may
+    # cast numeric columns to String, and _build_cell_expr uses the current dtype
+    # to decide whether default numeric formatting (e.g. .round()) should be
+    # applied. Using the original schema would incorrectly attempt numeric
+    # formatting on already-formatted string columns.
+    current_schema = lf.collect_schema()
+
     cell_expressions = []
     for c in visible_columns:
-        cell_expressions.append(
-            _build_cell_expr(c, lf.collect_schema()[c], attrs)
-        )
+        cell_expressions.append(_build_cell_expr(c, current_schema[c], attrs))
 
     row_expr = _lit('    <tr>') + _concat_str(cell_expressions) + _lit('</tr>')
     html_header, html_footer = _build_html_skeleton(visible_columns)
