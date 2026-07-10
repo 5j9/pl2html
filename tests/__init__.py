@@ -16,9 +16,12 @@ class HTMLNormalizer(HTMLParser):
         self.output.append(f'</{tag}>')
 
     def handle_data(self, data):
-        cleaned_data = data.strip()
-        if cleaned_data:
-            self.output.append(cleaned_data)
+        # Drop pure inter-tag newline/indentation noise,
+        # but preserve spaces if there is meaningful string content or text nodes
+        if data.strip() == '' and '\n' in data:
+            return
+
+        self.output.append(data)
 
 
 def normalize_html(html_str: str) -> str:
