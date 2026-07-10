@@ -184,24 +184,24 @@ def to_html(
     visible_columns = [c for c in schema.names() if c not in exclude_columns]
 
     # === STEP 1: RESOLVE AND ESCAPE ALL ATTRIBUTE EXPRESSIONS ===
-    style_selects = []
-    expr_tracker = {}
+    attr_exprs = []
+    attr_aliases = {}
 
     for col_name, attr_map in attrs.items():
         if col_name in visible_columns:
             for attr_name, expr in attr_map.items():
                 alias_key = f'__attr_{col_name}_{attr_name}'
-                style_selects.append(_escape_expr(expr).alias(alias_key))
-                expr_tracker[(col_name, attr_name)] = alias_key
+                attr_exprs.append(_escape_expr(expr).alias(alias_key))
+                attr_aliases[(col_name, attr_name)] = alias_key
 
-    if style_selects:
-        resolved_attrs_df = df.select(style_selects)
+    if attr_exprs:
+        resolved_attrs_df = df.select(attr_exprs)
 
         # Inject back as true native columns
         lf = lf.with_columns(
             [
                 resolved_attrs_df.get_column(alias)
-                for alias in expr_tracker.values()
+                for alias in attr_aliases.values()
             ]
         )
 
@@ -209,8 +209,8 @@ def to_html(
         for col_name, attr_map in attrs.items():
             new_attrs[col_name] = {}
             for attr_name in attr_map:
-                if (col_name, attr_name) in expr_tracker:
-                    alias = expr_tracker[(col_name, attr_name)]
+                if (col_name, attr_name) in attr_aliases:
+                    alias = attr_aliases[(col_name, attr_name)]
                     new_attrs[col_name][attr_name] = _col(alias)
                 else:
                     new_attrs[col_name][attr_name] = attr_map[attr_name]
