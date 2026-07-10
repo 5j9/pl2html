@@ -46,8 +46,10 @@ def _format_integer(col_name: str) -> _Expr:
 def _format_float(col_name: str) -> _Expr:
     """Formats floats with 3 decimals and thousands separators."""
     rounded_str = _col(col_name).round(3).cast(_String)
-    int_part = rounded_str.str.split_exact('.', 1).struct.field('field_0')
-    dec_part = rounded_str.str.split_exact('.', 1).struct.field('field_1')
+
+    parts = rounded_str.str.split_exact('.', 1)
+    int_part = parts.struct.field('field_0')
+    dec_part = parts.struct.field('field_1')
 
     formatted_int = (
         int_part.str.reverse()
