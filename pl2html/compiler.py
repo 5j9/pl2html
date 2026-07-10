@@ -35,6 +35,9 @@ def _format_integer(col_name: str) -> _Expr:
         _col(col_name)
         .fill_null(0)
         .cast(_String)
+        # Polars regex engine doesn't support look-behinds (e.g., (?<=\d)(?=(\d{3})+$)).
+        # We reverse the string, match chunks of 3 digits from the right, add commas,
+        # and then reverse it back to normal.
         .str.reverse()
         .str.replace_all(r'\d{3}', '$0,')
         .str.reverse()
