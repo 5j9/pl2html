@@ -1,3 +1,5 @@
+from html import escape as _escape
+
 from polars import (
     DataFrame as _DataFrame,
     DataType as _DataType,
@@ -104,8 +106,13 @@ def _build_cell_expr(
 
 def _build_html_skeleton(visible_columns: list[str]) -> tuple[_Expr, _Expr]:
     header_parts = ['<table>', '  <thead>\n    <tr>']
+
     for c in visible_columns:
-        header_parts.append(f'      <th>{c}</th>')
+        # NOTE: quote=False allows names like `Alice's "score"` to render naturally.
+        # This is safe ONLY because the string is confined strictly inside text nodes (<th>).
+        # DO NOT reuse these variables within HTML attributes.
+        header_parts.append(f'      <th>{_escape(c, quote=False)}</th>')
+
     header_parts.append('    </tr>\n  </thead>\n  <tbody>')
 
     html_header = _lit('\n'.join(header_parts) + '\n')

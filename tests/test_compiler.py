@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from html import escape
 
 from polars import DataFrame, Float64, String, col, lit, when
 
@@ -216,3 +217,59 @@ def test_attribute_values_are_securely_escaped():
     expected_substring = '<td title="Likes to write &quot;malicious&quot; code &amp; &lt;script&gt;tags&lt;/script&gt;">Admin</td>'
 
     assert expected_substring in actual_html
+
+
+def test_to_html_escapes_column_headers():
+    # 1. Setup a DataFrame containing a malicious column name with an XSS payload
+    # alongside a normal column name.
+    malicious_column = "<script>alert('xss')</script>"
+    normal_column = 'safe_header'
+
+    df = DataFrame({normal_column: [1], malicious_column: [2]})
+
+    # 2. Compile the DataFrame to HTML
+    html_output = to_html(df)
+
+    # 3. Assertions
+    # The normal column should be preserved
+    assert f'<th>{normal_column}</th>' in html_output
+
+    # The malicious column must be escaped safely
+    assert f'<th>{escape(malicious_column, quote=False)}</th>' in html_output
+
+    # Crucially, the raw script tag should NOT exist anywhere in the string
+    assert malicious_column not in html_output
+
+
+def test_to_html_allows_quotes_in_column_headers():
+    # 1. Setup a DataFrame with legitimate quotes in the column name
+    quoted_column = 'Alice\'s "score"'
+    df = DataFrame({quoted_column: [100]})
+
+    # 2. Compile to HTML
+    html_output = to_html(df)
+
+    # 3. Assertions
+    # With quote=False, the quotes should render as raw literal characters inside the <th> tag
+    assert f'<th>{quoted_column}</th>' in html_output
+
+
+def test_to_html_escapes_structural_html_with_quotes():
+    # 1. Setup a malicious column name that attempts an XSS payload using quotes.
+    # Even with quote=False, breaking out of the <th> is blocked because < and > are escaped.
+    malicious_column = '"> <script>alert(1)</script> <th>'
+    df = DataFrame({malicious_column: [1]})
+
+    # 2. Compile to HTML
+    html_output = to_html(df)
+
+    # 3. Assertions
+    # The brackets must be escaped, safely neutralizing the script injection
+    expected_escaped_header = escape(malicious_column, quote=False)
+
+    assert (
+        '&quot;&gt; &lt;script&gt;alert(1)&lt;/script&gt; &lt;th&gt;'
+        not in html_output
+    )  # confirm quotes weren't touched
+    assert f'<th>{expected_escaped_header}</th>' in html_output
+    assert '<script>' not in html_output
