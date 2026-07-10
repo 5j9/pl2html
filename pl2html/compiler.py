@@ -179,7 +179,8 @@ def to_html(
     exclude_columns = exclude_columns or []
     attrs = attrs or {}
 
-    schema = lf.collect_schema()
+    lf = (df := lf.collect()).lazy()
+    schema = df.schema
     visible_columns = [c for c in schema.names() if c not in exclude_columns]
 
     # === STEP 1: RESOLVE AND ESCAPE ALL ATTRIBUTE EXPRESSIONS ===
@@ -194,11 +195,10 @@ def to_html(
                 expr_tracker[(col_name, attr_name)] = alias_key
 
     if style_selects:
-        df = lf.collect()
         resolved_attrs_df = df.select(style_selects)
 
         # Inject back as true native columns
-        lf = df.lazy().with_columns(
+        lf = lf.with_columns(
             [
                 resolved_attrs_df.get_column(alias)
                 for alias in expr_tracker.values()
