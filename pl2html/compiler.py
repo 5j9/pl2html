@@ -136,40 +136,45 @@ def to_html(
         attrs: A dictionary mapping column names to cell attributes (e.g., style,
             class). The inner dictionary values can be raw Polars expressions that
             evaluate dynamically based on the column values.
-        exclude_columns: A list of column names to omit from the rendered HTML table.
+        exclude_columns: A list of column names to omit from the final rendered
+            HTML table. See note below on structural execution context.
         formatters: A single Polars expression or a list of expressions used to
             format column values into display strings (e.g., using `fmt_number`).
 
-    Returns:
-        A raw HTML string representation of the styled and formatted table.
+    Note on Execution Order (formatters and exclude_columns):
+        Both `formatters` and `exclude_columns` serve critical roles in preserving
+        the numeric evaluation state of the DataFrame before HTML compilation:
 
-    Note on Formatters Execution Order:
-        Usually, formatting expressions can be applied directly to the DataFrame
-        via `.with_columns()` before calling `to_html`. However, if your `attrs`
-        contain expressions that require numerical operations on data values (such
-        as computing percentage ranks or maximum thresholds via `rank_color`),
-        pre-formatting will convert those columns into `String` types too early and
-        cause downstream calculation panics (e.g., string division errors).
+        1. formatters: Usually, formatting expressions can be applied directly to
+           the DataFrame via `.with_columns()` before calling `to_html`. However,
+           doing so converts numeric columns into `String` types too early, causing
+           downstream style calculations (e.g., string division errors) to fail.
+           Passing them here guarantees formatting runs *after* style resolution.
 
-        By passing your formatting expressions to the `formatters` parameter
-        instead, `to_html` guarantees they are scheduled to execute *after* the
-        numerical style attributes have been safely resolved against the raw data.
+        2. exclude_columns: Dropping intermediate or helper columns before passing
+           the DataFrame to `to_html` removes the data context required by your
+           `attrs` expressions. By using `exclude_columns`, helper columns remain
+           fully accessible during the mathematical style resolution phase (Step 1),
+           but are cleanly filtered out before generating the HTML structural matrix.
 
     Example:
         >>> import polars as pl
         >>> from pl2html import to_html
-        >>> from pl2html.formats import fmt_number
         >>>
-        >>> df = pl.DataFrame({"sprd": [10.0, 50.0, 100.0]})
+        >>> # 'max_threshold' is a helper column required for styling but not rendering
+        >>> df = pl.DataFrame({
+        ...     "sprd": [10.0, 50.0, 100.0],
+        ...     "max_threshold": [120.0, 120.0, 120.0]
+        ... })
         >>>
-        >>> # A style rule that requires the column to remain numeric (Float64)
-        >>> attrs = {"sprd": {"style": pl.col("sprd") / pl.col("sprd").max()}}
+        >>> # Style depends on the unrendered 'max_threshold' column
+        >>> attrs = {"sprd": {"style": pl.col("sprd") / pl.col("max_threshold")}}
         >>>
-        >>> # Safe execution: styles are computed first, then text formatting is applied
+        >>> # Safe execution: 'max_threshold' is preserved for math, then omitted from output
         >>> html = to_html(
         ...     df,
         ...     attrs=attrs,
-        ...     formatters=fmt_number(columns=["sprd"], decimals=2)
+        ...     exclude_columns=["max_threshold"]
         ... )
     """
     lf = df.lazy() if isinstance(df, _DataFrame) else df
@@ -181,8 +186,6 @@ def to_html(
     visible_columns = [c for c in schema.names() if c not in exclude_columns]
 
     # === STEP 1: RESOLVE MATH/STYLE EXPRESSIONS ON NUMERIC DATA FIRST ===
-    # If there are style expressions, evaluate them into static string literals
-    # before applying the text formatters.
     style_selects = []
     style_maps = {}
 
@@ -193,17 +196,15 @@ def to_html(
             style_maps[col_name] = expr_key
 
     if style_selects:
-        # Collect just the evaluated style values using the numeric dataframe state
+        # Collect using the full numeric dataframe context (including excluded columns)
         df = lf.collect()
         lf = df.lazy()
         resolved_styles_df = df.select(style_selects)
 
-        # Replace the lazy expressions in attrs with concrete string series expressions
         new_attrs = {}
         for col_name, styles in attrs.items():
             new_attrs[col_name] = styles.copy()
             if col_name in style_maps:
-                # Inject the pre-calculated style vector back as a harmless literal expression
                 new_attrs[col_name]['style'] = _lit(
                     resolved_styles_df.get_column(style_maps[col_name])
                 )
@@ -215,7 +216,7 @@ def to_html(
             formatters = [formatters]
         lf = lf.with_columns(formatters)
 
-    # === STEP 3: BUILD HTML CELLS (Now 100% safe from string division errors!) ===
+    # === STEP 3: BUILD HTML CELLS ===
     cell_expressions = []
     for c in visible_columns:
         cell_expressions.append(
