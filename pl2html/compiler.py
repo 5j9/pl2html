@@ -155,17 +155,6 @@ def _resolve_attributes(
     return lf, new_attrs
 
 
-def _apply_user_formatters(
-    lf: _LazyFrame, formatters: _Expr | list[_Expr] | None
-) -> _LazyFrame:
-    """Applies layout transformation modifications/conversions to columns."""
-    if formatters is None:
-        return lf
-    if isinstance(formatters, _Expr):
-        formatters = [formatters]
-    return lf.with_columns(formatters)
-
-
 def _compile_html(
     lf: _LazyFrame,
     visible_columns: list[str],
@@ -266,7 +255,12 @@ def to_html(
         c for c in df_eager.schema.names() if c not in exclude_columns
     ]
 
-    lf, attrs = _resolve_attributes(lf, df_eager, attrs or {}, visible_columns)
-    lf = _apply_user_formatters(lf, formatters)
+    if attrs:
+        lf, attrs = _resolve_attributes(lf, df_eager, attrs, visible_columns)
+    else:
+        attrs = {}
+
+    if formatters is not None:
+        lf = lf.with_columns(formatters)
 
     return _compile_html(lf, visible_columns, attrs)
