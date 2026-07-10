@@ -14,8 +14,8 @@ from polars import (
 def _escape_expr(expr: _Expr) -> _Expr:
     """
     Escapes an expression's string representations for secure HTML compatibility.
-    Using literal=True prevents the '&' character in replacements from acting
-    as a regex match expansion macro.
+    Using literal=True is critical; otherwise, the '&' character in the replacement
+    string acts as a regex match expansion macro and corrupts the entities.
     """
     return (
         expr.cast(_String)
@@ -182,7 +182,7 @@ def to_html(
     schema = lf.collect_schema()
     visible_columns = [c for c in schema.names() if c not in exclude_columns]
 
-    # === STEP 1: RESOLVE AND ESCAPE ALL ATTRIBUTE EXPRESSIONS ON NUMERIC DATA FIRST ===
+    # === STEP 1: RESOLVE AND ESCAPE ALL ATTRIBUTE EXPRESSIONS ===
     style_selects = []
     expr_tracker = {}
 
@@ -190,17 +190,14 @@ def to_html(
         if col_name in visible_columns:
             for attr_name, expr in attr_map.items():
                 alias_key = f'__attr_{col_name}_{attr_name}'
-                # Safely escape the dynamic expressions on the live graph
-                escaped_expr = _escape_expr(expr)
-                style_selects.append(escaped_expr.alias(alias_key))
+                style_selects.append(_escape_expr(expr).alias(alias_key))
                 expr_tracker[(col_name, attr_name)] = alias_key
 
     if style_selects:
-        # Evaluate all expressions against the clean numeric context
         df = lf.collect()
         resolved_attrs_df = df.select(style_selects)
 
-        # Inject the precomputed, escaped series back into the LazyFrame plan as columns
+        # Inject back as true native columns
         lf = df.lazy().with_columns(
             [
                 resolved_attrs_df.get_column(alias)
@@ -208,7 +205,6 @@ def to_html(
             ]
         )
 
-        # Rebuild the attrs dict to reference our newly injected native columns
         new_attrs = {}
         for col_name, attr_map in attrs.items():
             new_attrs[col_name] = {}
@@ -220,7 +216,7 @@ def to_html(
                     new_attrs[col_name][attr_name] = attr_map[attr_name]
         attrs = new_attrs
 
-    # === STEP 2: APPLY FORMATTERS TO CONVERT COLUMNS TO STRINGS ===
+    # === STEP 2: APPLY FORMATTERS ===
     if formatters is not None:
         if isinstance(formatters, _Expr):
             formatters = [formatters]
