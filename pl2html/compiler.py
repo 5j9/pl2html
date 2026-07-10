@@ -84,19 +84,16 @@ def _build_cell_expr(
 
     fmt_expr = fmt_expr.fill_null('')
 
-    attr_expr_list = []
-    if col_name in attrs:
-        for attr_name, val_expr in attrs[col_name].items():
-            val_str_expr = val_expr.cast(_String)
-
-            compiled_attr = (
-                _when(val_str_expr.is_not_null() & (val_str_expr != ''))
-                .then(_lit(f' {attr_name}="') + val_str_expr + _lit('"'))
-                .otherwise(_lit(''))
+    if col_attrs := attrs.get(col_name):
+        attr_expr_list = [
+            _when(
+                (val_str_expr := val_expr.cast(_String)).is_not_null()
+                & (val_str_expr != '')
             )
-            attr_expr_list.append(compiled_attr)
-
-    if attr_expr_list:
+            .then(_lit(f' {attr_name}="') + val_str_expr + _lit('"'))
+            .otherwise(_lit(''))
+            for attr_name, val_expr in col_attrs.items()
+        ]
         opening_td = _lit('<td') + _concat_str(attr_expr_list) + _lit('>')
     else:
         opening_td = _lit('<td>')
