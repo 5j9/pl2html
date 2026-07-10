@@ -87,18 +87,15 @@ def _build_cell_expr(
     attr_expr_list = []
     if col_name in attrs:
         for attr_name, val_expr in attrs[col_name].items():
-            # If the expression returns null or empty for a specific row, skip writing the attribute
+            # Cast to String FIRST so we can safely check against '' without type panics
+            val_str_expr = val_expr.cast(_String)
+
             compiled_attr = (
-                _when(val_expr.is_not_null() & (val_expr != ''))
-                .then(
-                    _lit(f' {attr_name}="')
-                    + val_expr.cast(_String)
-                    + _lit('"')
-                )
+                _when(val_str_expr.is_not_null() & (val_str_expr != ''))
+                .then(_lit(f' {attr_name}="') + val_str_expr + _lit('"'))
                 .otherwise(_lit(''))
             )
             attr_expr_list.append(compiled_attr)
-
     # Combine attribute strings together
     if attr_expr_list:
         opening_td = _lit('<td') + _concat_str(attr_expr_list) + _lit('>')
@@ -185,29 +182,36 @@ def to_html(
     schema = lf.collect_schema()
     visible_columns = [c for c in schema.names() if c not in exclude_columns]
 
-    # === STEP 1: RESOLVE MATH/STYLE EXPRESSIONS ON NUMERIC DATA FIRST ===
+    # === STEP 1: RESOLVE ALL MATH/STYLE EXPRESSIONS ON DATA FIRST ===
     style_selects = []
-    style_maps = {}
+    # Maps (col_name, attr_name) -> unique temporary alias string
+    expr_tracker = {}
 
-    for col_name, styles in attrs.items():
-        if col_name in visible_columns and 'style' in styles:
-            expr_key = f'__style_{col_name}'
-            style_selects.append(styles['style'].alias(expr_key))
-            style_maps[col_name] = expr_key
+    for col_name, attr_map in attrs.items():
+        if col_name in visible_columns:
+            for attr_name, expr in attr_map.items():
+                alias_key = f'__attr_{col_name}_{attr_name}'
+                style_selects.append(expr.alias(alias_key))
+                expr_tracker[(col_name, attr_name)] = alias_key
 
     if style_selects:
-        # Collect using the full numeric dataframe context (including excluded columns)
+        # Evaluate all structural calculations against the clean numeric context
         df = lf.collect()
         lf = df.lazy()
-        resolved_styles_df = df.select(style_selects)
+        resolved_attrs_df = df.select(style_selects)
 
+        # Rebuild the attrs dict completely with harmless literal vectors
         new_attrs = {}
-        for col_name, styles in attrs.items():
-            new_attrs[col_name] = styles.copy()
-            if col_name in style_maps:
-                new_attrs[col_name]['style'] = _lit(
-                    resolved_styles_df.get_column(style_maps[col_name])
-                )
+        for col_name, attr_map in attrs.items():
+            new_attrs[col_name] = {}
+            for attr_name in attr_map:
+                if (col_name, attr_name) in expr_tracker:
+                    alias = expr_tracker[(col_name, attr_name)]
+                    new_attrs[col_name][attr_name] = _lit(
+                        resolved_attrs_df.get_column(alias)
+                    )
+                else:
+                    new_attrs[col_name][attr_name] = attr_map[attr_name]
         attrs = new_attrs
 
     # === STEP 2: APPLY FORMATTERS TO CONVERT COLUMNS TO STRINGS ===

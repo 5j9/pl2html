@@ -157,3 +157,39 @@ def test_to_html_evaluates_styles_before_formatters(expected_html):
         normalize_html(to_html(df, attrs=attrs, formatters=formatting_exprs))
         == expected_html
     )
+
+
+def test_dynamic_attributes_preserve_numeric_context(expected_html):
+    """
+    Ensures ALL attribute expressions (not just 'style') are resolved against
+    the raw numeric data context before text formatters distort the types.
+    """
+    # 1. Create a dataset where an attribute relies on math operations
+    df = DataFrame(
+        {'price': [100.0, 250.0, 50.0], 'benchmark': [150.0, 150.0, 150.0]}
+    )
+
+    # 2. Map expressions to non-style attributes ('class' and 'data-sort')
+    # that depend on un-formatted, numeric relationships
+    attrs = {
+        'price': {
+            'class': (
+                when(col('price') > col('benchmark'))
+                .then(lit('expensive'))
+                .otherwise(lit('normal'))
+            ),
+            'data-sort': col('price') / col('benchmark'),
+        }
+    }
+
+    # 3. Apply a formatter that converts 'price' to a String.
+    # On the old codebase, this causes Step 1 to skip evaluation (since it's not "style"),
+    # and Step 3 will panic attempting to divide String / Float64.
+    actual_html = to_html(
+        df,
+        attrs=attrs,
+        exclude_columns=['benchmark'],
+        formatters=fmt_number(columns=['price'], decimals=2),
+    )
+
+    assert normalize_html(actual_html) == expected_html
