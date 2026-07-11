@@ -69,3 +69,24 @@ def test_rank_color_interpolation(expected_html):
 
     # Assert
     assert normalize_html(actual_html) == expected_html
+
+
+def test_data_color_nan_values(expected_html):
+    """
+    NaN values should not cause rendering to fail.
+    Cells containing NaN simply receive no background style.
+    """
+    df = DataFrame(
+        {
+            'metric': [1.0, float('nan'), 2.0, float('nan'), 3.0],
+        }
+    )
+
+    style_config = data_color(
+        column='metric',
+        palette=['#94B894', '#FDCB6E', '#FDBF75'],
+    )
+
+    actual_html = to_html(df, attrs=style_config)
+
+    assert normalize_html(actual_html) == expected_html

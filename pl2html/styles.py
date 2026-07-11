@@ -34,9 +34,24 @@ def _interpolate_segment(
     local_factor = (norm_val - seg_start) / segment_width
 
     # Linear interpolation formula applied directly to Polars Expressions
-    r_expr = (_lit(r1) + (_lit(r2 - r1) * local_factor)).round(0).cast(_Int32)
-    g_expr = (_lit(g1) + (_lit(g2 - g1) * local_factor)).round(0).cast(_Int32)
-    b_expr = (_lit(b1) + (_lit(b2 - b1) * local_factor)).round(0).cast(_Int32)
+    r_expr = (
+        (_lit(r1) + (_lit(r2 - r1) * local_factor))
+        .fill_nan(None)
+        .round(0)
+        .cast(_Int32)
+    )
+    g_expr = (
+        (_lit(g1) + (_lit(g2 - g1) * local_factor))
+        .fill_nan(None)
+        .round(0)
+        .cast(_Int32)
+    )
+    b_expr = (
+        (_lit(b1) + (_lit(b2 - b1) * local_factor))
+        .fill_nan(None)
+        .round(0)
+        .cast(_Int32)
+    )
 
     return r_expr, g_expr, b_expr
 
