@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from html import escape
 
-from polars import DataFrame, Float64, String, col, lit, when
+from polars import DataFrame, Float64, Object, String, col, lit, when
 
 from pl2html.compiler import to_html
 from pl2html.formats import fmt_number
@@ -273,3 +273,38 @@ def test_to_html_escapes_structural_html_with_quotes():
     )  # confirm quotes weren't touched
     assert f'<th>{expected_escaped_header}</th>' in html_output
     assert '<script>' not in html_output
+
+
+def test_to_html_escapes_object_column_values():
+    class CustomObject:
+        def __str__(self):
+            return '<script>alert("xss")</script>'
+
+    df = DataFrame(
+        {'value': [CustomObject()]},
+        schema={'value': Object},
+    )
+
+    html_output = to_html(df)
+
+    assert (
+        '<td>&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;</td>'
+        in html_output
+    )
+    assert '<script>' not in html_output
+
+
+def test_to_html_supports_nulls_in_object_columns():
+    class CustomObject:
+        def __str__(self):
+            return 'custom value'
+
+    df = DataFrame(
+        {'value': [CustomObject(), None]},
+        schema={'value': Object},
+    )
+
+    html_output = to_html(df)
+
+    assert '<td>custom value</td>' in html_output
+    assert '<td></td>' in html_output

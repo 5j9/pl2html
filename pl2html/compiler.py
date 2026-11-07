@@ -1,27 +1,39 @@
 from html import escape as _escape
+from warnings import catch_warnings as _catch_warnings
 
 from polars import (
     DataFrame as _DataFrame,
     DataType as _DataType,
     Expr as _Expr,
     LazyFrame as _LazyFrame,
+    Object as _Object,
     String as _String,
     col as _col,
     concat_str as _concat_str,
     lit as _lit,
     when as _when,
 )
+from polars.exceptions import (
+    PolarsInefficientMapWarning as _PolarsInefficientMapWarning,
+)
 
 
-def _escape_expr(expr: _Expr) -> _Expr:
+def _escape_expr(expr: _Expr, is_object: bool) -> _Expr:
     """
     Escapes an expression's string representations for secure HTML compatibility.
-    Using literal=True is critical; otherwise, the '&' character in the replacement
-    string acts as a regex match expansion macro and corrupts the entities.
     """
+    if is_object:
+        with _catch_warnings(
+            action='ignore', category=_PolarsInefficientMapWarning
+        ):
+            expr = expr.map_elements(
+                str, return_dtype=_String, skip_nulls=True
+            )
+    else:
+        expr = expr.cast(_String)
+
     return (
-        expr.cast(_String)
-        .str.replace_all('&', '&amp;', literal=True)
+        expr.str.replace_all('&', '&amp;', literal=True)
         .str.replace_all('<', '&lt;', literal=True)
         .str.replace_all('>', '&gt;', literal=True)
         .str.replace_all('"', '&quot;', literal=True)
@@ -80,7 +92,7 @@ def _build_cell_expr(
     elif dtype.is_float():
         fmt_expr = _format_float(col_name)
     else:
-        fmt_expr = _escape_expr(_col(col_name))
+        fmt_expr = _escape_expr(_col(col_name), dtype == _Object)
 
     fmt_expr = fmt_expr.fill_null('')
 
@@ -131,7 +143,7 @@ def _resolve_attributes(
         if col_name in visible_columns:
             for attr_name, expr in attr_map.items():
                 alias_key = f'__attr_{col_name}_{attr_name}'
-                attr_exprs.append(_escape_expr(expr).alias(alias_key))
+                attr_exprs.append(_escape_expr(expr, False).alias(alias_key))
                 attr_aliases[(col_name, attr_name)] = alias_key
 
     if not attr_exprs:
