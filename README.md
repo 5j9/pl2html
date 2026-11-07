@@ -74,20 +74,22 @@ from pl2html import formats as fmt
 
 df = pl.DataFrame(
     {
-        "asset_a": [5400600, 2100],
-        "asset_b": [45100000, -850000],
-        "growth": [0.1256, -0.024],
-        "is_active": [True, False],
-        "status_code": [0, 404]
+        'asset_a': [5400600, 2100],
+        'asset_b': [45100000, -850000],
+        'growth': [0.1256, -0.024],
+        'is_active': [True, False],
+        'status_code': [0, 404],
     }
 )
 
 # Format multiple financial asset columns compactly in one pass using lists
 df_f = df.with_columns(
-    fmt.fmt_integer(["asset_a", "asset_b"], compact=True, compact_system="financial"),
-    fmt.fmt_percent("growth", decimals=1),
-    fmt.fmt_tf("is_active", tf_style="check-mark"),
-    fmt.sub_zero("status_code", zero_text="OK")
+    fmt.fmt_integer(
+        ['asset_a', 'asset_b'], compact=True, compact_system='financial'
+    ),
+    fmt.fmt_percent('growth', decimals=1),
+    fmt.fmt_tf('is_active', tf_style='check-mark'),
+    fmt.sub_zero('status_code', zero_text='OK'),
 )
 
 html = to_html(df_f)
@@ -116,7 +118,7 @@ styles.update(
     data_color(
         column='performance_score',
         palette=['#ff7675', '#fdcb6e', '#00b894'],
-        auto_contrast=True
+        auto_contrast=True,
     )
 )
 
@@ -126,7 +128,7 @@ styles.update(
         column='utilization',
         palette=['#000000', '#FFFFFF'],
         descending=False,
-        auto_contrast=True
+        auto_contrast=True,
     )
 )
 
